@@ -1,7 +1,10 @@
 <?php
 
+use App\Modules\Identity\Http\Controllers\LoginController;
+use App\Modules\Identity\Http\Controllers\LogoutController;
+use App\Modules\Identity\Http\Controllers\MeController;
+use App\Modules\Identity\Http\Controllers\RegisterController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\V1\Auth\AuthController;
 
 /*
 |--------------------------------------------------------------------------
@@ -12,12 +15,15 @@ use App\Http\Controllers\Api\V1\Auth\AuthController;
 | Public routes: register, login
 | Protected routes: me, logout
 |
+| Routes are centralized here (modules never load their own routes); each
+| endpoint points at the owning module's controller.
+|
 */
 
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/register', RegisterController::class);
+Route::post('/login', LoginController::class);
 
 Route::middleware('auth:sanctum')->group(function (): void {
-    Route::get('/me', [AuthController::class, 'me']);
-    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/me', MeController::class);
+    Route::post('/logout', LogoutController::class);
 });

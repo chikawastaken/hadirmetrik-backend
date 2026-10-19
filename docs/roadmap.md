@@ -97,16 +97,24 @@ Jika layanan email/OTP belum siap, gunakan kode undangan terbatas untuk developm
 
 ### Backend Laravel — pekerjaan
 
-- [ ] Pasang dan konfigurasi Laravel Sanctum untuk API token mobile.
-- [ ] Buat/validasi struktur `users`, `employees`, role atau permission dasar, dan relasinya.
-- [ ] Implementasikan `POST /api/v1/register`.
-- [ ] Implementasikan `POST /api/v1/login`.
-- [ ] Implementasikan `GET /api/v1/me` dengan autentikasi.
-- [ ] Implementasikan `POST /api/v1/logout` untuk mencabut token saat ini.
-- [ ] Tambahkan validasi payload, respons error, rate limiting login/register, dan pencatatan peristiwa keamanan yang relevan.
-- [ ] Pastikan API tidak menerima `role`, `is_admin`, atau status istimewa dari payload registrasi.
-- [ ] Buat seeder data awal untuk pengujian lokal: akun HR, satu karyawan, dan/atau invitation code development.
-- [ ] Tambahkan automated feature tests untuk register, login, `/me`, logout, dan akses tidak sah.
+- [x] Pasang dan konfigurasi Laravel Sanctum untuk API token mobile.
+- [x] Buat/validasi struktur `users`, `employees`, role atau permission dasar, dan relasinya.
+- [x] Implementasikan `POST /api/v1/register`.
+- [x] Implementasikan `POST /api/v1/login`.
+- [x] Implementasikan `GET /api/v1/me` dengan autentikasi.
+- [x] Implementasikan `POST /api/v1/logout` untuk mencabut token saat ini.
+- [x] Tambahkan validasi payload, respons error, rate limiting login/register, dan pencatatan peristiwa keamanan yang relevan.
+- [x] Pastikan API tidak menerima `role`, `is_admin`, atau status istimewa dari payload registrasi.
+- [x] Buat seeder data awal untuk pengujian lokal: akun HR, satu karyawan, dan/atau invitation code development.
+- [x] Tambahkan automated feature tests untuk register, login, `/me`, logout, dan akses tidak sah.
+
+> Implementasi backend Phase 1 memakai modular monolith dengan batas modul
+> `Identity`, `Employees`, dan `Audit` (lihat
+> `docs/adr/0001-modular-monolith-module-contracts.md`). Perilaku baru di atas
+> Phase 0: kolom `users.role` (selalu `employee` saat registrasi), verifikasi
+> `employee_number` terhadap record HR, tabel `security_events`, dan seeder yang
+> mewajibkan password dari environment (`SEED_ADMIN_PASSWORD`,
+> `SEED_EMPLOYEE_PASSWORD`).
 
 ### Flutter — pekerjaan
 
@@ -200,16 +208,16 @@ secure storage.
 
 M1 dianggap selesai apabila:
 
-- [ ] Register berhasil dengan data karyawan/invitation yang valid.
-- [ ] Register ditolak untuk karyawan yang tidak dikenal, email tidak cocok, undangan tidak valid, atau akun yang sudah terdaftar.
-- [ ] Pengguna bisa login dengan credential yang benar.
-- [ ] Password salah menghasilkan error yang aman dan tidak membocorkan apakah akun tertentu ada.
-- [ ] Endpoint terlindungi menolak request tanpa token atau dengan token tidak valid.
-- [ ] `/me` hanya mengembalikan identitas pengguna terautentikasi.
-- [ ] Token tersimpan aman dan sesi dapat dipulihkan setelah aplikasi ditutup/dibuka kembali.
-- [ ] Logout mencabut token dan membersihkan penyimpanan lokal.
-- [ ] Role ditetapkan di backend dan tidak dapat dinaikkan melalui payload.
-- [ ] Feature tests backend dan alur utama Flutter lulus.
+- [x] Register berhasil dengan data karyawan/invitation yang valid.
+- [x] Register ditolak untuk karyawan yang tidak dikenal, email tidak cocok, undangan tidak valid, atau akun yang sudah terdaftar.
+- [x] Pengguna bisa login dengan credential yang benar.
+- [x] Password salah menghasilkan error yang aman dan tidak membocorkan apakah akun tertentu ada.
+- [x] Endpoint terlindungi menolak request tanpa token atau dengan token tidak valid.
+- [x] `/me` hanya mengembalikan identitas pengguna terautentikasi.
+- [ ] Token tersimpan aman dan sesi dapat dipulihkan setelah aplikasi ditutup/dibuka kembali. _(sisi Flutter)_
+- [ ] Logout mencabut token dan membersihkan penyimpanan lokal. _(pencabutan token backend selesai; pembersihan storage menyusul di Flutter)_
+- [x] Role ditetapkan di backend dan tidak dapat dinaikkan melalui payload.
+- [ ] Feature tests backend dan alur utama Flutter lulus. _(feature tests backend lulus: 26 tes; alur Flutter belum ada)_
 - [ ] Flutter terhubung ke API Laravel yang berjalan di lingkungan development, bukan data dummy saja.
 
 ### Urutan implementasi untuk mempercepat hasil
