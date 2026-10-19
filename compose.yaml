@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: hadirmetrik-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hadirmetrik}
+      POSTGRES_USER: ${POSTGRES_USER:-hadirmetrik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env and set POSTGRES_PASSWORD}
+    ports:
+      # Only expose PostgreSQL on the local machine.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - hadirmetrik_pgdata:/var/lib/postgresql/data
+      # These scripts execute only when PostgreSQL initializes an empty data directory.
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  adminer:
+    image: adminer:4
+    container_name: hadirmetrik-adminer
+    restart: unless-stopped
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"
+
+volumes:
+  hadirmetrik_pgdata:

@@ -1,0 +1,3 @@
+# Init scripts in this directory run only when the PostgreSQL data volume is
+# created for the first time. Keep .gitkeep so the Docker Compose bind mount
+# resolves to a tracked directory.

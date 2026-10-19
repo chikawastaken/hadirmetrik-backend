@@ -1,0 +1,383 @@
+openapi: 3.1.0
+info:
+  title: HadirMetrik API — Auth
+  description: |
+    Kontrak endpoint minimum untuk autentikasi yang dipakai bersama oleh
+    developer backend Laravel dan developer mobile Flutter.
+
+    Aturan kontrak:
+
+    - Semua endpoint berada di bawah prefix `/api/v1`.
+    - Semua request dan response berformat JSON (`Accept: application/json`).
+    - Endpoint terproteksi memakai header `Authorization: Bearer <token>`.
+    - Response sukses: `{ "success": true, "data": <...>, "message": <opsional> }`.
+    - Response error: `{ "success": false, "message": <...>, "errors": <opsional> }`.
+    - `message` pada response sukses hanya muncul jika backend mengisinya.
+    - Error dari framework (401, 403, 404, 405, 422, 429) juga memakai envelope
+      error di atas; lihat `bootstrap/app.php`.
+
+    File ini adalah sumber kebenaran kontrak auth. Perubahan pada
+    `routes/api/v1/auth.php` harus disertai pembaruan file ini.
+  version: 0.1.0
+
+tags:
+  - name: System
+    description: Health check dan diagnostik service.
+  - name: Auth
+    description: Registrasi, login, profil, dan logout karyawan.
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+  - url: https://api.hadirmetrik.local
+    description: Production (placeholder)
+
+paths:
+  /api/v1/health:
+    get:
+      summary: Health check
+      tags: [System]
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/register:
+    post:
+      summary: Registrasi / aktivasi akun karyawan
+      tags: [Auth]
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              employee_number: "EMP-0001"
+              work_email: "karyawan@example.com"
+              password: "rahasia123"
+              password_confirmation: "rahasia123"
+              invitation_code: "A1B2C3D4"
+      responses:
+        '200':
+          description: Registrasi berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+              example:
+                success: true
+                message: "Registrasi berhasil. Silakan gunakan token untuk akses selanjutnya."
+                data:
+                  token: "3|AbCdEf..."
+                  token_type: "Bearer"
+                  user:
+                    id: 2
+                    name: "Karyawan Contoh"
+                    email: "karyawan@example.com"
+        '409':
+          description: Email sudah terdaftar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Akun dengan email ini sudah terdaftar."
+        '422':
+          description: Validasi gagal (termasuk email/undangan tidak cocok)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Validasi gagal."
+                errors:
+                  work_email: ["The selected work email is invalid."]
+                  invitation_code: ["The selected invitation code is invalid."]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/login:
+    post:
+      summary: Login karyawan
+      tags: [Auth]
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: "karyawan@example.com"
+              password: "rahasia123"
+              device_name: "Android Pixel 7"
+      responses:
+        '200':
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+              example:
+                success: true
+                message: "Login berhasil."
+                data:
+                  token: "3|AbCdEf..."
+                  token_type: "Bearer"
+                  user:
+                    id: 2
+                    name: "Karyawan Contoh"
+                    email: "karyawan@example.com"
+        '401':
+          description: Kredensial salah
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Kredensial tidak valid."
+        '422':
+          description: Validasi gagal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Validasi gagal."
+                errors:
+                  email: ["The email field is required."]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/me:
+    get:
+      summary: Profil pengguna terautentikasi
+      tags: [Auth]
+      operationId: getMe
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profil pengguna
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+              example:
+                success: true
+                data:
+                  id: 2
+                  name: "Karyawan Contoh"
+                  email: "karyawan@example.com"
+        '401':
+          description: Tidak terautentikasi (token hilang/invalid/kadaluarsa)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Unauthenticated."
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/logout:
+    post:
+      summary: Logout — cabut token saat ini
+      tags: [Auth]
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+              example:
+                success: true
+                message: "Logout berhasil."
+                data: null
+        '401':
+          description: Tidak terautentikasi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Unauthenticated."
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Sanctum
+      description: Token yang diterima dari endpoint /register atau /login.
+
+  responses:
+    TooManyRequests:
+      description: Terlalu banyak permintaan (rate limit `throttle:api`, 60/menit per user/IP).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResource'
+          example:
+            success: false
+            message: "Too Many Attempts."
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [employee_number, work_email, password, password_confirmation, invitation_code]
+      properties:
+        employee_number:
+          type: string
+          description: Nomor pegawai unik sesuai data HR.
+          example: "EMP-0001"
+        work_email:
+          type: string
+          format: email
+          description: Email kerja karyawan yang sudah terdaftar di sistem.
+          example: "karyawan@example.com"
+        password:
+          type: string
+          minLength: 8
+          description: Password akun baru.
+          example: "rahasia123"
+        password_confirmation:
+          type: string
+          description: Konfirmasi password yang sama.
+          example: "rahasia123"
+        invitation_code:
+          type: string
+          description: Kode undangan satu kali dari HR/admin.
+          example: "A1B2C3D4"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "karyawan@example.com"
+        password:
+          type: string
+          example: "rahasia123"
+        device_name:
+          type: string
+          description: Nama perangkat untuk identifikasi token (opsional).
+          example: "Android Pixel 7"
+
+    AuthSuccessResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: [string, "null"]
+          description: Pesan sukses; ada hanya jika backend mengisinya.
+        data:
+          type: object
+          required: [token, token_type, user]
+          properties:
+            token:
+              type: string
+              description: Sanctum personal access token.
+            token_type:
+              type: string
+              example: "Bearer"
+            user:
+              type: object
+              required: [id, name, email]
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+                email:
+                  type: string
+
+    MeResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required: [id, name, email]
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+            email:
+              type: string
+
+    LogoutResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: [string, "null"]
+        data:
+          type: [object, "null"]
+          description: Selalu `null` untuk logout.
+
+    HealthResponse:
+      type: object
+      required: [status, timestamp, database]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+        timestamp:
+          type: string
+          format: date-time
+        database:
+          type: string
+          enum: [connected, error]
+        database_error:
+          type: [string, "null"]
+          description: Pesan error database; hanya terisi saat APP_DEBUG=true.
+
+    ErrorResource:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+        errors:
+          type: [object, array, "null"]
+          description: Detail validasi/kegagalan (opsional). Umumnya map field → daftar pesan.
