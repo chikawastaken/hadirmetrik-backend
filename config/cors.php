@@ -16,7 +16,7 @@ return [
 
     'allowed_origins' => explode(
         ',',
-        env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:8080,http://10.0.2.2:8080')
+        env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:8080,http://10.0.2.2:8080,https://editor.swagger.io')
     ),
 
     'allowed_origins_patterns' => [],

@@ -1,13 +1,17 @@
 # HadirMetrik — AI Employee Attendance & Workforce Management: System Architecture
 
-**Document Version:** 1.0.0  
-**Status:** Proposed Architecture Baseline  
+**Document Version:** 1.1.0  
+**Status:** Revised Baseline — onboarding karyawan oleh HR, undangan registrasi wajah (email/WhatsApp), autentikasi identifier ± password, dan skema bigint  
 **Target Stack:** Flutter / Dart, Laravel REST API, PostgreSQL, Redis (optional queue/cache), Python FastAPI for face-recognition inference (subject to model and deployment decisions), Docker, Nginx  
 **Architecture Style:** Polyrepo + Laravel Modular Monolith  
 **Primary Interface:** Mobile application  
 **Domain Strategy:** One root domain with a dedicated API subdomain; exact domain to be selected by the project team
 
 ---
+
+> **Revisi 1.1.0 (2026-10-24):** Menambahkan desain registrasi karyawan yang bersifat **HR-only** (tanpa self-registration publik), pengiriman undangan registrasi wajah melalui **email dan/atau WhatsApp**, login dengan **email atau `employee_number` + password**, `employee_number` yang **dibuat otomatis** (format `HM-0251`), password sementara sistem yang ditampilkan sekali, master data divisi/shift/lokasi kerja, histori assignment dan kompensasi berbasis periode efektif, serta model undangan + delivery untuk audit. Semua PK diubah dari UUID ke **`bigint`**. Bagian yang direvisi pada dokumen ini ditulis dalam Bahasa Indonesia; bagian yang tidak disentuh tetap mempertahankan isi versi 1.0.0.
+>
+> ADR pendukung: `docs/adr/0002` … `0008` (lihat §15.1).
 
 ## 1. Executive Summary & Objective
 
@@ -355,6 +359,180 @@ sequenceDiagram
 
 Salary values must be protected by object-level authorization. A client must never be able to retrieve another employee's salary simply by changing an ID or period parameter.
 
+### 4.6 Registrasi Karyawan oleh HR (Create Employee + Undangan) — *baru di v1.1*
+
+> Flow ini **menggantikan** flow register lama (`POST /register` dengan `invitation_code`).
+> Registrasi bersifat **HR-only**; tidak ada self-registration publik. Legacy endpoint
+> `/register` akan ditandai *deprecated* dan dihapus setelah repo mobile berpindah.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor HR as HR
+    participant UI as Klien HR
+    participant API as Laravel API
+    participant DB as PostgreSQL
+    participant Q as Queue Worker / Gateway email & WhatsApp
+
+    HR->>UI: Buka form “Tambah Karyawan”
+    HR->>UI: Isi nama, email, nomor WhatsApp, divisi, jabatan, atasan langsung, tanggal mulai, shift, lokasi kerja, kompensasi, toggle kirim undangan
+    UI->>API: POST /api/v1/hr/employees
+    API->>API: Autentikasi + cek role HR (role ditetapkan backend, tidak dibaca dari payload)
+    API->>API: Validasi: divisi/shift/lokasi aktif, manager aktif & tanpa cycle, saluran undangan (WhatsApp wajib bila dipilih), rentang expiry 1–14 hari
+    API->>API: Generate `employee_number` berikutnya (format `HM-0251`) dan password sementara acak
+    API->>DB: BEGIN TRANSACTION
+    API->>DB: INSERT users (email lowercase, password hash sementara, role=employee, status=active, must_change_password=true)
+    API->>DB: INSERT employees (user_id, employee_number, manager_id, division_id, employment_start, employment_status)
+    API->>DB: INSERT employee_compensations (paket aktif, effective_from = employment_start)
+    API->>DB: INSERT employee_shift_assignments + employee_work_location_assignments (effective_from = employment_start)
+    alt send_invitation = true
+        API->>DB: INSERT employee_invitations (token_hash SHA-256 + pepper, expires_at = created_at + 3 hari default)
+    else send_invitation = false
+        Note over API,DB: Employee tetap dibuat tanpa undangan; HR bisa mengirim undangan belakangan
+    end
+    API->>DB: INSERT audit_logs (employee.created, compensation.created, assignment.created, invitation.created)
+    API->>DB: COMMIT
+    API->>Q: Dispatch job pengiriman undangan (per channel, idempotent)
+    API-->>UI: Data employee + employee_number + status undangan + status delivery per channel + initial_password (ditampilkan sekali)
+    Q-->>DB: INSERT invitation_deliveries; UPDATE sent_at / last_sent_at
+    Note over HR,UI: HR menyampaikan initial_password lewat kanal terpisah (bukan email/WhatsApp undangan). Password tidak pernah disimpan plaintext dan tidak masuk log.
+```
+
+**Catatan transaksi:** seluruh insert di atas harus atomik. Jika penyisipan salah satu bagian gagal (misal `EMAIL_TAKEN`), transaksi rollback dan tidak ada user/employee/undangan yang tertinggal. Job pengiriman baru dispatch setelah commit (idempotency diatur §8.2).
+
+### 4.7 Pengiriman Undangan dan Callback Delivery
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant API as Laravel API
+    participant Q as Queue Worker
+    participant GW as Email / WhatsApp Gateway
+    participant DB as PostgreSQL
+
+    Q->>GW: Kirim link registrasi wajah + instruksi
+    GW-->>Q: ACK (accepted) + provider_message_id
+    Q->>DB: UPDATE invitation_deliveries SET status='sent', sent_at, provider_message_id
+    API->>DB: UPDATE employee_invitations SET status='sent', sent_at, last_sent_at (idempotent)
+    GW-->>API: Webhook delivery callback
+    API->>API: Verifikasi signature webhook, dedupe provider_message_id
+    API->>DB: UPDATE invitation_deliveries SET status='delivered'/'failed', delivered_at/failed_at, error_code
+    Note over API,DB: Kegagalan satu channel tidak mengubah status employee/akun; retry membuat delivery baru dengan attempt berikutnya. Token/password tidak pernah muncul di log webhook.
+```
+
+### 4.8 Login, Wajib Ganti Password, Accept Undangan, Enrollment Wajah
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Employee as Karyawan
+    participant App as Flutter App
+    participant API as Laravel API
+    participant DB as PostgreSQL
+    participant AI as Face Service
+
+    Employee->>App: Login dengan identifier (email ATAU employee_number) + password
+    App->>API: POST /api/v1/auth/login
+    API->>DB: Cari user via email ATAU employees.employee_number; verifikasi hash; cek status
+    alt user suspended
+        API-->>App: 403 ACCOUNT_SUSPENDED (tanpa membocorkan detail lain)
+    else kredensial salah
+        API-->>App: 401 INVALID_CREDENTIALS (pesan generik) + security_events login.failed
+    end
+    API->>DB: security_events login.succeeded; UPDATE last_login_at
+    API-->>App: Token + must_change_password=true
+    Note over App,API: Jika must_change_password, semua endpoint lain selain /auth/logout dan /auth/me hanya mengizinkan akses perubahan password
+    Employee->>App: Ganti password lewat form
+    App->>API: POST /api/v1/auth/change-password
+    API->>DB: UPDATE users SET password=hash_baru, must_change_password=false; security_events password.changed
+    API-->>App: Sesi penuh aktif
+
+    Employee->>App: Klik link registrasi wajah dari email/WhatsApp
+    App->>API: POST /api/v1/invitations/{token}/accept (dengan token sesi login)
+    API->>DB: Validasi: hash token cocok (constant-time), belum expired, belum revoked, belum accepted, employee_id undangan = employee milik user login
+    API-->>App: Reservation undangan valid untuk enrollment
+
+    Employee->>App: Kamera mengambil citra wajah + liveness check
+    App->>API: POST /api/v1/face/enrollments (invitation token)
+    API->>DB: INSERT face_templates (status=pending, provider, model_version)
+    API->>AI: Kirim citra terenkripsi via FaceVerificationProvider
+    AI-->>API: template_reference, quality_score, model_version
+    alt Enrollment sukses
+        API->>DB: UPDATE face_templates set status='active', enrolled_at; partial-unique aktif per employee
+        API->>DB: UPDATE employee_invitations SET status='accepted', accepted_at; UPDATE employees SET face_registered_at
+        API->>DB: INSERT audit_logs (face.enrolled, invitation.accepted); security_events face.enrollment.succeeded
+    else Enrollment gagal (kualitas rendah / gagal liveness)
+        API->>DB: face_templates status='failed'; invitation tetap pending (bisa dicoba ulang sampai expiry)
+        API->>DB: security_events face.enrollment.failed
+    end
+    API-->>App: Status enrollment / instruksi coba lagi
+```
+
+### 4.9 Resend dan Revoke Undangan — *baru di v1.1*
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor HR as HR
+    participant UI as Klien HR
+    participant API as Laravel API
+    participant DB as PostgreSQL
+    participant Q as Queue Worker
+
+    HR->>UI: Pilih employee → Resend undangan
+    UI->>API: POST /api/v1/hr/employees/{id}/invitations
+    API->>API: Autorisasi HR; hanya undangan pending/sent yang boleh di-resend
+    API->>DB: TRANSACTION: revoke undangan lama (token lama tidak berlaku) → buat undangan baru (token_hash baru, expires_at dihitung ulang)
+    API->>DB: audit_logs invitation.resent
+    API->>Q: Job kirim per channel yang dipilih
+    API-->>UI: Undangan baru + status delivery per channel
+
+    HR->>UI: Pilih employee → Revoke undangan
+    UI->>API: DELETE /api/v1/hr/invitations/{id}
+    API->>DB: UPDATE employee_invitations SET status='revoked', revoked_at (guard: tidak boleh revoked dua kali)
+    API->>DB: audit_logs invitation.revoked
+```
+
+### 4.10 Scheduler Expiry Undangan
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Scheduler
+    participant API as Laravel API
+    participant DB as PostgreSQL
+
+    S->>API: Job berkala (mis. tiap 10 menit)
+    API->>DB: SELECT employee_invitations WHERE status IN ('pending','sent') AND expires_at < now()
+    loop setiap undangan kadaluarsa
+        API->>DB: UPDATE status='expired' (guard idempotent: skip jika sudah expired)
+        API->>DB: audit_logs invitation.expired (ringkas, tanpa token)
+    end
+    Note over API,DB: Accept tetap memvalidasi expiry saat akses, sehingga race condition antara scheduler dan accept tetap aman.
+```
+
+### 4.11 Terminasi / Suspensi Karyawan dan Pencabutan Akses
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor HR as HR
+    participant UI as Klien HR
+    participant API as Laravel API
+    participant DB as PostgreSQL
+    participant AI as Face Service
+
+    HR->>UI: Ubah status karyawan → terminated / suspended
+    UI->>API: POST /api/v1/hr/employees/{id}/employment-status (endpoint lanjutan M2)
+    API->>DB: UPDATE employees SET employment_status; UPDATE users SET status='suspended'
+    API->>DB: Revoke undangan aktif (status='revoked', revoked_at)
+    API->>DB: Revoke face_template aktif (status='revoked', revoked_at) + hapus template di face service sesuai retensi
+    API->>DB: Cabut semua token akses (personal access tokens)
+    API->>DB: audit_logs employee.employment_status_changed (before/after, reason)
+    API-->>UI: Konfirmasi perubahan status
+    Note over API,DB: Terminasi bersifat terminal di level HR; reaktivasi hanya lewat admin + audit (§5.10).
+```
+
 ---
 
 ## 5. Domain State Machines
@@ -448,210 +626,670 @@ This is a proposed workflow. If the system imports finalized payroll from anothe
 | Salary statement | Draft/reviewed → published | Payroll-authorized HR | Period and statement are valid; actor has payroll permission. |
 | Employee | Any sensitive profile change | Authorized HR/admin | Policy and audit record are required. |
 
+### 5.6 Invitation State — *baru di v1.1*
+
+```text
+[PENDING] --> [SENT] --> [ACCEPTED]
+   |            |
+   |            +--> [EXPIRED]
+   +---------------> [REVOKED]
+[SENT] --> [REVOKED]        (resend: token lama dirotasi)
+[EXPIRED]/[REVOKED] ----------> (undangan baru) [PENDING]
+```
+
+Guard:
+
+- Create/revoke/resend hanya oleh HR (policy `hr.manage-employees`).
+- Accept hanya oleh employee pemilik undangan (object-level authorization: `employee_id` undangan harus sama dengan employee milik user yang login).
+- Accept mewajibkan sesi login (401 bila belum login; token undangan hanya mengizinkan face enrollment untuk employee yang sedang login — bukan kanal login). Error `FACE_ENROLLMENT_REQUIRED` dipakai untuk menolak presensi bila belum ada template aktif.
+- Token: hash SHA-256 + pepper, perbandingan constant-time, one-time use.
+- Expiry default 3 hari (rentang API: 1–14); diproses scheduler (§4.10) **dan** dicek ulang saat accept agar race-safe.
+- Resend hanya untuk undangan `pending`/`sent`; undangan lama direvoke dan dibuat undangan baru (rotasi token).
+- Setiap perubahan status penting ditulis ke `audit_logs` (`invitation.created`, `invitation.resent`, `invitation.revoked`, `invitation.accepted`); event keamanan terkait masuk `security_events` (`invitation.accepted`).
+
+### 5.7 Invitation Delivery State — *baru di v1.1*
+
+```text
+[QUEUED] --> [SENT] --> [DELIVERED]
+[QUEUED] --> [FAILED]
+[SENT]   --> [FAILED]
+[SENT]/[DELIVERED] --> [BOUNCED]
+```
+
+Guard:
+
+- Satu record `invitation_deliveries` per `(invitation_id, channel, attempt)` — unique di level database.
+- Job retry harus idempotent: mencoba ulang membuat `attempt` baru, bukan menimpa record.
+- Kegagalan delivery **tidak** mengubah status employee/user/invitation; status per channel terpisah.
+- `error_message` disanitasi tanpa PII; token dan password tidak pernah masuk delivery/log.
+
+### 5.8 Face Template State — *baru di v1.1*
+
+```text
+[PENDING] --> [ACTIVE]
+[PENDING] --> [FAILED]
+[ACTIVE]  --> [REVOKED]
+[FAILED]  --> [PENDING]     (retry enrollment, butuh undangan yang masih valid)
+```
+
+Guard:
+
+- Hanya employee pemilik template (via user yang login) yang dapat enroll; tidak ada enroll atas nama orang lain.
+- Setiap enroll butuh `employee_invitations` yang valid (hash cocok, belum expired/revoked/accepted) dan `purpose = face_enrollment`.
+- Maksimal satu template `active` per employee — partial unique index.
+- Terminasi/suspensi employee memicu revoke template aktif (§5.10).
+- Status `active`/`failed` ditetapkan server setelah hasil dari `FaceVerificationProvider`, bukan dari klien.
+
+### 5.9 User State — *baru di v1.1*
+
+```text
+[ACTIVE] <--> [SUSPENDED]
+must_change_password = true --> false   (setelah ganti password)
+```
+
+Guard:
+
+- User `suspended` tidak bisa login lagi dan seluruh token aktif dicabut.
+- Login response selalu menyertakan `must_change_password`; selama `true`, semua endpoint selain `/auth/me`, `/auth/change-password`, dan `/auth/logout` ditolak dengan error `PASSWORD_CHANGE_REQUIRED`.
+- Transisi status user (suspensi/aktif kembali) dicatat di `audit_logs` dengan aktor HR/admin dan alasan.
+
+### 5.10 Employment State — *baru di v1.1*
+
+```text
+[PROBATION] --> [ACTIVE]
+[PROBATION] --> [CONTRACT]
+[PROBATION] --> [TERMINATED]
+[ACTIVE]    --> [PROBATION] / [CONTRACT] / [TERMINATED]
+[CONTRACT]  --> [ACTIVE] / [TERMINATED]
+[TERMINATED]   → terminal (reaktivasi hanya admin + audit)
+```
+
+Guard:
+
+- Hanya HR yang berwenang mengubah `employment_status`; default `probation` saat create, dapat dioverride di payload create.
+- Terminasi/suspensi mencabut: token akses, undangan aktif, dan template wajah aktif (§4.11).
+- Karyawan `terminated` tidak muncul sebagai opsi manager aktif dan tidak dapat login.
+- Setiap perubahan status ditulis ke `audit_logs` (`employee.employment_status_changed`, before/after + reason).
+
 ---
 
 ## 6. Domain Model & Persistence Schema
 
 ### 6.1 Entity-Relationship Diagram (ERD)
 
-The following ERD represents a baseline. Fields and relationships should be adjusted after requirements for payroll calculation, multi-location policy, and task collaboration are finalized.
+ERD v1.1 dibelah menjadi dua diagram agar tetap terbaca di GitHub:
+
+1. **ERD Onboarding & Identitas** — domain baru di v1.1: user, employee, master data divisi/shift/lokasi kerja, assignment, kompensasi, undangan + delivery, template wajah, audit, dan security events.
+2. **ERD Presensi, Tugas, Pengajuan & Gaji** — domain yang sudah ada sejak v1.0.0 dan **tetap dipertahanan**; hanya PK-nya yang dikonversi dari UUID ke `bigint`.
+
+Keputusan utama skema (spesifikasi lengkap per tabel ada di §6.4):
+
+- Semua primary key memakai `bigint`; tidak lagi memakai UUID sebagai PK.
+- `employee_number` (contoh `HM-0251`) adalah **business key unik yang dibuat otomatis oleh backend dan immutable** — bukan primary key; dipakai sebagai salah satu identifier login.
+- Undangan, delivery per channel, histori assignment shift/lokasi, histori kompensasi, dan status enrollment wajah kini dimodelkan eksplisit.
+- `attendance_records.event_id` **tetap UUID/ULID** karena berfungsi sebagai external idempotency key, bukan PK (§6.3).
+
+#### 6.1.1 ERD Onboarding & Identitas
 
 ```mermaid
 erDiagram
-    USER ||--o| EMPLOYEE : authenticates_as
-    EMPLOYEE ||--o{ ATTENDANCE_RECORD : records
-    EMPLOYEE ||--o{ FACE_TEMPLATE : enrolls
-    EMPLOYEE ||--o{ TASK_ASSIGNMENT : receives
-    TASK ||--o{ TASK_ASSIGNMENT : has
-    TASK ||--o{ TASK_SUBMISSION : receives
-    EMPLOYEE ||--o{ TASK_SUBMISSION : submits
-    EMPLOYEE ||--o{ ADMINISTRATIVE_REQUEST : submits
-    EMPLOYEE ||--o{ SALARY_STATEMENT : owns
-    SALARY_STATEMENT ||--o{ SALARY_COMPONENT : itemizes
-    ATTENDANCE_RECORD ||--o| ATTENDANCE_VERIFICATION : verified_by
-    WORK_LOCATION ||--o{ ATTENDANCE_RECORD : used_for
-    USER ||--o{ AUDIT_LOG : performs
-    USER ||--o{ ADMINISTRATIVE_REQUEST : reviews
-    USER ||--o{ TASK : creates
+    USER ||--o| EMPLOYEE : "punya profil"
+    DIVISION ||--o{ EMPLOYEE : "mengelompokkan"
+    EMPLOYEE ||--o{ EMPLOYEE : "atasan langsung"
+    EMPLOYEE ||--o{ EMPLOYEE_SHIFT_ASSIGNMENT : "punya riwayat"
+    SHIFT ||--o{ EMPLOYEE_SHIFT_ASSIGNMENT : "dipakai"
+    EMPLOYEE ||--o{ EMPLOYEE_WORK_LOCATION_ASSIGNMENT : "punya riwayat"
+    WORK_LOCATION ||--o{ EMPLOYEE_WORK_LOCATION_ASSIGNMENT : "dipakai"
+    EMPLOYEE ||--o{ EMPLOYEE_COMPENSATION : "punya riwayat"
+    EMPLOYEE ||--o{ EMPLOYEE_INVITATION : "menerima undangan"
+    EMPLOYEE_INVITATION ||--o{ INVITATION_DELIVERY : "dikirim per channel"
+    EMPLOYEE ||--o{ FACE_TEMPLATE : "enrolls"
+    USER ||--o{ EMPLOYEE_INVITATION : "created_by"
+    USER ||--o{ AUDIT_LOG : "performs"
+    USER ||--o{ SECURITY_EVENT : "involves"
 
     USER {
-        uuid id PK
-        string name
-        string email
-        string password_hash
-        string role
-        string status
-        timestamp created_at
-        timestamp updated_at
+        bigint id PK
+        varchar name
+        varchar email UK "lowercase, unique"
+        varchar password "hash Argon2id atau bcrypt"
+        varchar role "employee | hr | admin"
+        varchar status "active | suspended"
+        boolean must_change_password "default true"
+        timestamptz last_login_at "nullable"
+        timestamptz email_verified_at "nullable"
     }
-
     EMPLOYEE {
-        uuid id PK
-        uuid user_id FK
-        string employee_number
-        string department
-        string job_title
+        bigint id PK
+        bigint user_id FK "UNIQUE dan NOT NULL"
+        varchar employee_number UK "format HM-0251, immutable"
+        varchar full_name
+        varchar work_email UK "salinan HR dari users.email"
+        varchar phone_e164 UK "nullable, format E.164"
+        bigint division_id FK "RESTRICT"
+        bigint manager_id FK "self-reference, nullable"
+        varchar job_title
         date employment_start
-        string employment_status
-        timestamp created_at
-        timestamp updated_at
+        varchar employment_status "default probation"
+        timestamptz face_registered_at "nullable"
     }
-
-    ATTENDANCE_RECORD {
-        uuid id PK
-        uuid employee_id FK
-        uuid work_location_id FK
-        string event_type
-        string status
-        timestamp occurred_at
-        timestamp received_at
-        string source
-        string idempotency_key
-        string device_reference
-        timestamp created_at
+    DIVISION {
+        bigint id PK
+        varchar name UK
+        varchar code UK
+        boolean is_active "default true"
     }
-
-    ATTENDANCE_VERIFICATION {
-        uuid id PK
-        uuid attendance_record_id FK
-        string method
-        string model_version
-        float match_score
-        string liveness_status
-        string decision
-        jsonb metadata
-        timestamp verified_at
-    }
-
-    FACE_TEMPLATE {
-        uuid id PK
-        uuid employee_id FK
-        string template_reference
-        string model_version
-        string status
-        timestamp enrolled_at
-        timestamp revoked_at
-    }
-
-    WORK_LOCATION {
-        uuid id PK
-        string name
-        decimal latitude
-        decimal longitude
-        decimal geofence_radius_m
+    SHIFT {
+        bigint id PK
+        varchar name UK
+        time start_time
+        time end_time "contoh 06:00 untuk shift malam"
+        varchar timezone "default Asia/Jakarta"
+        boolean is_overnight "end_time <= start_time"
         boolean is_active
     }
-
-    TASK {
-        uuid id PK
-        uuid created_by FK
-        string title
-        text description
-        string priority
-        string status
-        timestamp due_at
-        timestamp created_at
-        timestamp updated_at
+    WORK_LOCATION {
+        bigint id PK
+        varchar name UK
+        text address "nullable"
+        numeric latitude "cek -90..90"
+        numeric longitude "cek -180..180"
+        integer geofence_radius_m "default 100, wajib > 0"
+        varchar timezone "default Asia/Jakarta"
+        boolean is_active
     }
-
-    TASK_ASSIGNMENT {
-        uuid id PK
-        uuid task_id FK
-        uuid employee_id FK
-        string status
-        int progress_percent
-        timestamp assigned_at
-        timestamp completed_at
+    EMPLOYEE_SHIFT_ASSIGNMENT {
+        bigint id PK
+        bigint employee_id FK "CASCADE"
+        bigint shift_id FK "RESTRICT"
+        date effective_from
+        date effective_to "nullable"
+        bigint created_by FK "nullable, FK users"
     }
-
-    TASK_SUBMISSION {
-        uuid id PK
-        uuid task_id FK
-        uuid employee_id FK
-        text note
-        jsonb checklist
-        jsonb evidence_references
-        string review_status
-        uuid reviewed_by FK
-        timestamp submitted_at
-        timestamp reviewed_at
+    EMPLOYEE_WORK_LOCATION_ASSIGNMENT {
+        bigint id PK
+        bigint employee_id FK "CASCADE"
+        bigint work_location_id FK "RESTRICT"
+        date effective_from
+        date effective_to "nullable"
+        bigint created_by FK "nullable, FK users"
     }
-
-    ADMINISTRATIVE_REQUEST {
-        uuid id PK
-        uuid employee_id FK
-        string request_type
-        date start_date
-        date end_date
-        decimal overtime_hours
-        text reason
-        string status
-        uuid reviewed_by FK
-        text review_note
-        timestamp submitted_at
-        timestamp decided_at
+    EMPLOYEE_COMPENSATION {
+        bigint id PK
+        bigint employee_id FK "RESTRICT"
+        varchar currency "char 3, default IDR"
+        numeric base_salary
+        numeric transport_allowance "default 0"
+        numeric meal_allowance "default 0"
+        date effective_from
+        date effective_to "nullable"
+        bigint created_by FK "nullable, FK users"
     }
-
-    SALARY_STATEMENT {
-        uuid id PK
-        uuid employee_id FK
-        string payroll_period
-        decimal base_salary
-        decimal total_allowances
-        decimal overtime_amount
-        decimal total_deductions
-        decimal net_salary
-        string status
-        timestamp published_at
-        timestamp created_at
+    EMPLOYEE_INVITATION {
+        bigint id PK
+        bigint employee_id FK "CASCADE"
+        varchar purpose "default face_enrollment"
+        varchar token_hash UK "SHA-256 hex, disimpan sebagai hash"
+        varchar status "pending|sent|accepted|expired|revoked"
+        jsonb requested_channels "contoh: email dan whatsapp"
+        timestamptz expires_at
+        timestamptz sent_at "nullable"
+        timestamptz accepted_at "nullable"
+        timestamptz revoked_at "nullable"
+        integer attempts "default 0"
+        bigint created_by FK "RESTRICT"
     }
-
-    SALARY_COMPONENT {
-        uuid id PK
-        uuid salary_statement_id FK
-        string component_type
-        string label
-        decimal amount
-        text explanation
+    INVITATION_DELIVERY {
+        bigint id PK
+        bigint invitation_id FK "CASCADE"
+        varchar channel "email | whatsapp"
+        varchar recipient "email atau nomor E.164"
+        varchar provider "nullable, gateway"
+        varchar provider_message_id "nullable"
+        varchar status "queued|sent|delivered|failed|bounced"
+        integer attempt "default 1"
+        varchar error_code "nullable"
+        text error_message "nullable, disanitasi tanpa PII"
+        timestamptz delivered_at "nullable"
+        timestamptz failed_at "nullable"
     }
-
+    FACE_TEMPLATE {
+        bigint id PK
+        bigint employee_id FK "RESTRICT"
+        varchar template_reference "private object storage / face provider"
+        varchar provider "nullable"
+        varchar model_version
+        varchar status "pending|active|failed|revoked"
+        numeric quality_score "nullable"
+        jsonb metadata "nullable, tanpa image atau embedding mentah"
+        timestamptz enrolled_at "nullable"
+        timestamptz revoked_at "nullable"
+    }
     AUDIT_LOG {
-        uuid id PK
-        uuid actor_user_id FK
-        string entity_type
-        uuid entity_id
-        string action
-        jsonb before_snapshot
-        jsonb after_snapshot
-        string reason
-        timestamp recorded_at
+        bigint id PK
+        bigint actor_user_id FK "nullable, SET NULL"
+        varchar entity_type
+        varchar entity_id "string: bigint id atau UUID external"
+        varchar action
+        jsonb before_snapshot "tanpa password, token, atau face data"
+        jsonb after_snapshot "tanpa password, token, atau face data"
+        text reason "nullable"
+        varchar ip_address "nullable"
+        text user_agent "nullable"
+        timestamptz recorded_at "default now()"
+    }
+    SECURITY_EVENT {
+        bigint id PK
+        varchar event "login.succeeded, login.failed, password.changed, cs."
+        bigint actor_user_id FK "nullable"
+        jsonb context "nullable, tanpa password atau token"
     }
 ```
 
+Catatan diagram: `AUDIT_LOG` dipakai bersama oleh kedua domain; untuk space digambar sekali pada ERD ini. Relasi `USER`—`AUDIT_LOG` (actor) dan `USER`—`SECURITY_EVENT` (actor) berlaku juga untuk seluruh aksi presensi/tugas/gaji.
+
+#### 6.1.2 ERD Presensi, Tugas, Pengajuan & Gaji
+
+```mermaid
+erDiagram
+    USER ||--o| EMPLOYEE : "authenticates_as"
+    EMPLOYEE ||--o{ ATTENDANCE_RECORD : "records"
+    EMPLOYEE ||--o{ TASK_ASSIGNMENT : "receives"
+    TASK ||--o{ TASK_ASSIGNMENT : "has"
+    TASK ||--o{ TASK_SUBMISSION : "receives"
+    EMPLOYEE ||--o{ TASK_SUBMISSION : "submits"
+    EMPLOYEE ||--o{ ADMINISTRATIVE_REQUEST : "submits"
+    EMPLOYEE ||--o{ SALARY_STATEMENT : "owns"
+    SALARY_STATEMENT ||--o{ SALARY_COMPONENT : "itemizes"
+    ATTENDANCE_RECORD ||--o| ATTENDANCE_VERIFICATION : "verified_by"
+    WORK_LOCATION ||--o{ ATTENDANCE_RECORD : "used_for"
+    USER ||--o{ ADMINISTRATIVE_REQUEST : "reviews"
+    USER ||--o{ TASK : "creates"
+
+    ATTENDANCE_RECORD {
+        bigint id PK
+        bigint employee_id FK
+        bigint work_location_id FK
+        varchar event_type "check_in | check_out"
+        varchar status "accepted | pending_review | rejected | dsb"
+        timestamptz occurred_at "diklaim klien, tidak otoritatif"
+        timestamptz received_at "server time"
+        varchar source "online | offline_sync"
+        uuid event_id UK "idempotency external, tetap UUID/ULID"
+        varchar device_reference "nullable"
+    }
+    ATTENDANCE_VERIFICATION {
+        bigint id PK
+        bigint attendance_record_id FK
+        varchar method
+        varchar model_version
+        numeric match_score
+        varchar liveness_status
+        varchar decision
+        jsonb metadata
+        timestamptz verified_at
+    }
+    TASK {
+        bigint id PK
+        bigint created_by FK "users"
+        varchar title
+        text description
+        varchar priority
+        varchar status
+        timestamptz due_at
+    }
+    TASK_ASSIGNMENT {
+        bigint id PK
+        bigint task_id FK
+        bigint employee_id FK
+        varchar status
+        integer progress_percent
+        timestamptz assigned_at
+        timestamptz completed_at
+    }
+    TASK_SUBMISSION {
+        bigint id PK
+        bigint task_id FK
+        bigint employee_id FK
+        text note
+        jsonb checklist
+        jsonb evidence_references
+        varchar review_status
+        bigint reviewed_by FK "users, nullable"
+        timestamptz submitted_at
+        timestamptz reviewed_at
+    }
+    ADMINISTRATIVE_REQUEST {
+        bigint id PK
+        bigint employee_id FK
+        varchar request_type "cuti | izin | lembur"
+        date start_date
+        date end_date
+        numeric overtime_hours
+        text reason
+        varchar status
+        bigint reviewed_by FK "users"
+        text review_note
+        timestamptz submitted_at
+        timestamptz decided_at
+    }
+    SALARY_STATEMENT {
+        bigint id PK
+        bigint employee_id FK
+        varchar payroll_period "contoh 2026-09"
+        numeric base_salary
+        numeric total_allowances
+        numeric overtime_amount
+        numeric total_deductions
+        numeric net_salary
+        varchar status
+        timestamptz published_at
+    }
+    SALARY_COMPONENT {
+        bigint id PK
+        bigint salary_statement_id FK
+        varchar component_type
+        varchar label
+        numeric amount
+        text explanation
+    }
+```
+
+> Table `AUDIT_LOG`, `SECURITY_EVENT`, `WORK_LOCATION`, dan `EMPLOYEE` sudah ada di §6.1.1 dan berlaku untuk diagram ini juga (tidak digambar ulang). Untuk tabel domain presensi/tugas/gaji, kolom mengikuti definisi v1.0.0 dengan PK dikonversi ke `bigint`; perbedaan penting: `event_id` pada `attendance_records` tetap UUID sebagai idempotency key.
+
+
 ### 6.2 Additional Tables to Consider
 
-| Table | Purpose |
-|---|---|
-| `devices` | Device registration and trust metadata if device binding is a requirement. |
-| `sync_batches` | Tracks submitted synchronization batches and processing summaries. |
-| `attendance_correction_requests` | Formal corrections to attendance records, instead of silently overwriting them. |
-| `request_attachments` | Metadata for evidence/document attachments. |
-| `task_attachments` | Metadata for work evidence and task files. |
-| `notifications` | Optional in-app notifications and delivery status. |
-| `salary_publication_events` | Optional separate log for payroll publication actions. |
-| `personal_access_tokens` or equivalent | Depends on the selected Laravel authentication approach. |
+| Table | Status di v1.1 | Purpose |
+|---|---|---|
+| `divisions`, `shifts`, `work_locations` | **Dari kandidat → target tabel inti** | Master data organisasi: divisi, shift (termasuk overnight), lokasi kerja + geofence. Dibahas penuh di §6.4. |
+| `employee_shift_assignments`, `employee_work_location_assignments` | **Tabel inti baru** | Histori assignment dengan `effective_from`/`effective_to`; selalu ada tepat satu assignment aktif per jenis. |
+| `employee_compensations` | **Tabel inti baru** | Paket kompensasi berlaku per periode; total bulanan dihitung server, tidak disimpan. |
+| `employee_invitations`, `invitation_deliveries` | **Tabel inti baru** | Menggantikan `invitation_codes`: undangan registrasi wajah per purpose + riwayat pengiriman per channel untuk audit. |
+| `face_templates` | Siap | Sekarang terikat invitation flow; hanya menyimpan `template_reference` (tanpa raw biometrik), dengan satu template `active` per employee. |
+| `audit_logs` | Siap | Append-only; pencatatan aksi HR/employee yang consequential (bukan telemetri auth — itu `security_events`). |
+| `devices` | Kandidat | Registrasi/perangkat tepercaya jika binding device diwajibkan. |
+| `sync_batches` | Kandidat | Pelacak batch sinkronisasi presensi offline. |
+| `attendance_correction_requests` | Kandidat | Koreksi presensi melalui workflow, bukan overwrite. |
+| `request_attachments`, `task_attachments` | Kandidat | Metadata dokumen/bukti di storage privat. |
+| `notifications` | Kandidat | Notifikasi in-app dan status pengirimannya. |
+| `salary_publication_events` | Kandidat | Log terpisah aksi publikasi payroll. |
+| `personal_access_tokens` (atau padanannya) | Ada | route Sanctum token; token dicabut saat suspend/terminate. |
+| `sessions`, `password_reset_tokens` | Ada (default Laravel) | Kredensial reset memakai tabel ini; token disimpan sebagai hash. |
 
-### 6.3 Persistence and Integrity Rules
+### 6.2.1 Tabel Lama yang Diubah atau Dihapus — *baru di v1.1*
 
-- Use UUIDs or another globally unique event identifier for mobile-generated attendance events.
-- Add foreign keys, appropriate indexes, and unique constraints.
-- Define uniqueness around attendance event idempotency so retries cannot create duplicates.
-- Store both client-claimed `occurred_at` and server `received_at`; do not treat the device clock as authoritative.
-- Store timestamps consistently (prefer UTC in persistence) and render local time according to the organization's configured timezone.
-- Store salary amounts with an exact decimal type, not binary floating-point.
-- Do not store raw face images or embeddings unless the use case requires it and access, retention, encryption, and deletion policies are documented.
-- Prefer private references to files over public URLs.
-- Audit consequential administrative actions, particularly attendance corrections, approvals, employee changes, and salary publication.
+| Tabel lama / kolom lama | Keputusan v1.1 | Alasan |
+|---|---|---|
+| `invitation_codes` | **Dihapus**; digantikan `employee_invitations` + `invitation_deliveries` | Fungsi kodenya (aktivasi akun) dimasukkan ke flow HR create; undangan v1.1 punya expiry, hash token, channel, status, dan delivery per channel. Pre-production → data lama tidak dimigrasikan. |
+| `employees.position` → `job_title` | Diubah | Konsistensi penamaan; `position` terlalu polisemik. |
+| `employees.division` (string) → `division_id` (FK `divisions`) | Diubah | Master table mencegah divisi tipe-ketik bebas dan duplikat. |
+| `employees.is_active` → `employment_status` | Diubah | Butuh state machine (§5.10): `probation`, `active`, `contract`, `terminated`. |
+| `employees.name` → `full_name` | Diubah | Sinkron dengan `users.name` pada create/update. |
+| `employees.phone` → `phone_e164` | Diubah | Format E.164 normal (contoh `+6281227453318`) agar bisa dipakai WhatsApp gateway langsung. |
+| `users` tanpa `status` / `must_change_password` / `last_login_at` | **Ditambah** | Prasyarat password sementara + wajib ganti, suspensi akun, dan telemetri login. |
+| PK UUID di seluruh ERD v1.0.0 | Diubah ke `bigint` | Sesuai keputusan final; UUID/ULID hanya untuk external id/idempotency. |
+
+### 6.3 Persistence and Integrity Rules — diperbarui di v1.1
+
+Aturan yang berlaku untuk seluruh skema (domain baru dan tertahan):
+
+- **Primary key & tipe:** semua PK `bigint`; teks PostgreSQL (`varchar`, `text`, `timestamptz`, `date`, `time`, `numeric`, `jsonb`, `boolean`). UUID/ULID hanya untuk external id (`attendance_records.event_id`) atau idempotency key lintas layanan.
+- **Timestamp** disimpan UTC (`timestamptz`) dan dirender lokal sesuai timezone organisasi; jam perangkat klien tidak pernah menjadi sumber kebenaran.
+- **Email** disimpan lowercase dan unik (`users.email`, `employees.work_email`); **nomor WhatsApp** disimpan dalam format E.164 (contoh `+6281227453318`).
+- **Status** memakai string + check constraint (bukan `ENUM` PostgreSQL) agar mudah dievolusi; contoh: `employment_status`, `invitation_status`, `delivery_status`, `face_template_status`, `user_role`, `user_status`.
+- **Kardinalitas kunci:**
+  - setiap employee punya tepat satu user (`employees.user_id NOT NULL UNIQUE`, `ON DELETE RESTRICT`);
+  - user bisa berupa employee atau HR (HR tidak punya employee);
+  - satu undangan aktif (`pending`/`sent`) per `(employee_id, purpose)` — partial unique index;
+  - satu template wajah `active` per employee — partial unique index;
+  - satu kompensasi aktif per employee — partial unique index `WHERE effective_to IS NULL`;
+  - satu assignment aktif per jenis (shift / lokasi) per employee — partial unique index.
+- **Assignment & kompensasi histori:** perubahan shift/lokasi/kompensasi menutup record lama dengan `effective_to` lalu membuat record baru; tidak ada update in-place untuk nilai yang berlaku ekonomis.
+- **Idempotency:** event presensi tetap unik per `event_id`; job pengiriman undangan juga idempotent per `(invitation_id, channel, attempt)`.
+- **Nilai uang** tipe `numeric`, tidak pernah binary float, dan **total kompensasi tidak disimpan** — dihitung server dari komponen.
+- **Nomor sistem:** `employee_number` dibuat otomatis (`HM-` + nomor urut), unik, immutable, tidak pernah berasal dari payload klien.
+- **Kredensial:** password disimpan hanya sebagai hash (Argon2id/bcrypt); token undangan disimpan hanya sebagai hash SHA-256 + pepper; total kompensasi… token dan password tidak pernah masuk log. Password sementara tidak pernah disimpan plaintext.
+- **Biometrik:** tidak menyimpan raw face image/embedding di database kecuali ada keputusan eksplisit (§12.2); `face_templates.template_reference` menunjuk ke object storage privat/face provider.
+- **Soft delete:** tidak dipakai untuk employee. Akhir hubungan kerja dinyatakan dengan `employment_status = terminated` plus kebijakan retensi; `employees.user_id` memakai `ON DELETE RESTRICT`.
+- **Audit trail:** riwayat undangan dan delivery disimpan untuk audit (append-only di sisi aplikasi); aksi HR yang consequential masuk `audit_logs`, telemetri auth masuk `security_events` (§6.4).
+- **FK:** semua relasi memakai FK dengan `ON DELETE` yang disengaja — `CASCADE` untuk data turunan teknis (assignment, undangan, delivery), `RESTRICT` untuk entitas dengan nilai historis/ekonomis (kompensasi, shift, lokasi, divisi, template), `SET NULL` untuk referensi aktor opsional (`manager_id`, `created_by`).
+
+---
+
+### 6.4 Spesifikasi Tabel Target — *baru di v1.1*
+
+Semua tabel memakai `bigint` PK, timestamp `timestamptz` UTC, dan status string + check constraint. `jsonb` dipetakan ke kolom JSON/text di lingkungan uji SQLite (lihat §9.5). DDL ringkas berikut hanya untuk memperjelas constraint; bukan resep SQL final.
+
+#### `users` — akun autentikasi
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `name` | `varchar(255)` | no | — | Sinkron dengan `employees.full_name` saat create/update |
+| `email` | `varchar(255)` | no | — | Lowercase, **unique**; source of truth untuk login |
+| `password` | `varchar(255)` | no | — | Hash (Argon2id/bcrypt); tidak pernah plaintext |
+| `role` | `varchar(32)` | no | `'employee'` | `employee` / `hr` / `admin`; ditetapkan backend, tidak dari payload |
+| `status` | `varchar(32)` | no | `'active'` | `active` / `suspended` |
+| `must_change_password` | `boolean` | no | `true` | Wajib ganti password saat login pertama |
+| `last_login_at` | `timestamptz` | yes | — | Diperbarui pada `login.succeeded` |
+| `email_verified_at` | `timestamptz` | yes | — | Verifikasi email disarankan, bukan prasyarat login (§15.2) |
+| `remember_token` | `varchar(100)` | yes | — | Standar Laravel |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Check: `role IN (...)`, `status IN (...)`.
+- Alasan: `must_change_password` bersifat default-`true` supaya password sementara sistem tidak bisa dipakai terus; `status` memungkinkan suspensi tanpa soft delete.
+
+#### `employees` — profil karyawan
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `user_id` | `bigint` | no | — | FK `users.id`, `ON DELETE RESTRICT`, **unique** |
+| `employee_number` | `varchar(32)` | no | — | **Unique**, format `HM-0251`, dibuat backend, immutable |
+| `full_name` | `varchar(255)` | no | — | Disinkronkan dengan `users.name` |
+| `work_email` | `varchar(255)` | no | — | **Unique**, salinan HR dari `users.email` |
+| `phone_e164` | `varchar(20)` | yes | — | **Unique** (nullable); satu nomor WA untuk satu employee |
+| `division_id` | `bigint` | no | — | FK `divisions.id`, `ON DELETE RESTRICT` |
+| `job_title` | `varchar(255)` | no | — | Pengganti `position` |
+| `manager_id` | `bigint` | yes | — | Self-FK `employees.id`, `ON DELETE SET NULL` |
+| `employment_start` | `date` | no | — | Dasar `effective_from` assignment/kompensasi |
+| `employment_status` | `varchar(32)` | no | `'probation'` | `active`/`probation`/`contract`/`terminated` |
+| `face_registered_at` | `timestamptz` | yes | — | Diisi saat enrollment sukses |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `division_id`, `manager_id`, `employment_status`.
+- Check: `employment_status IN (...)`; `manager_id <> id` (update) — cek cycle manager divalidasi di aplikasi (error `MANAGER_CYCLE`).
+- Alasan: `user_id NOT NULL UNIQUE` karena HR selalu membuat akun bersama employee. Jika suatu saat perlu employee tanpa akun (import massal), gunakan mekanisme import terpisah — jangan menjadikan kolom nullable. `work_email` adalah salinan HR dari `users.email`; duplikasi sengaja untuk keterbacaan report MVP, alternatifnya view/trigger sinkronisasi (bisa diterapkan belakangan).
+
+#### `divisions` — master divisi
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `name` | `varchar(100)` | no | — | **Unique** |
+| `code` | `varchar(32)` | no | — | **Unique** |
+| `is_active` | `boolean` | no | `true` | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Seed minimal: `Operasional` dan divisi lain yang dibutuhkan organisasi.
+- Alasan: mengganti `employees.division` string bebas dengan FK supaya filter/report konsisten.
+
+#### `shifts` — master shift
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `name` | `varchar(100)` | no | — | **Unique** |
+| `start_time` | `time` | no | — | — |
+| `end_time` | `time` | no | — | — |
+| `timezone` | `varchar(64)` | no | `'Asia/Jakarta'` | — |
+| `is_overnight` | `boolean` | no | `false` | Turunan dari `end_time <= start_time` |
+| `is_active` | `boolean` | no | `true` | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Seed: `Pagi 08:00–17:00` (`is_overnight=false`), `Siang 13:00–22:00` (`false`), `Malam 21:00–06:00` (`true`).
+- Alasan: shift malam lintas hari (21:00–06:00) tidak diakali dengan interval biasa; `is_overnight` (dan aturan presensinya) mengatasi ini. Radius/lokasi tidak disimpan di shift (lihat `work_locations`).
+
+#### `work_locations` — master lokasi kerja + geofence
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `name` | `varchar(255)` | no | — | **Unique**; contoh “Gudang Kalasan” |
+| `address` | `text` | yes | — | — |
+| `latitude` / `longitude` | `numeric(9,6)` | no | — | Check −90…90 / −180…180 |
+| `geofence_radius_m` | `integer` | no | `100` | Check `> 0`; dipakai untuk presensi |
+| `timezone` | `varchar(64)` | no | `'Asia/Jakarta'` | — |
+| `is_active` | `boolean` | no | `true` | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Alasan: radius geofence disimpan per lokasi, **bukan** per employee; lokasi berubah lebih sering daripada kebijakan radius.
+
+#### `employee_shift_assignments` — histori assignment shift
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE CASCADE` |
+| `shift_id` | `bigint` | no | — | FK `shifts.id`, `ON DELETE RESTRICT` |
+| `effective_from` | `date` | no | — | Saat create: `employment_start` |
+| `effective_to` | `date` | yes | — | Diisi saat digantikan |
+| `created_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: partial unique `(employee_id) WHERE effective_to IS NULL`; `(employee_id, effective_from)`; `shift_id`.
+- Check: `effective_to IS NULL OR effective_to >= effective_from`.
+- Alasan: perubahan shift = tutup record lama + buat record baru → ada histori lengkap, tidak ada overwrite.
+
+#### `employee_work_location_assignments` — histori assignment lokasi kerja
+
+Identik dengan `employee_shift_assignments` dengan `work_location_id` FK `work_locations.id` (`ON DELETE RESTRICT`). Partial unique index `(employee_id) WHERE effective_to IS NULL` — satu assignment aktif. Saat ini satu employee satu lokasi aktif; multi-lokasi dibahas di §15.2 (open question).
+
+#### `employee_compensations` — paket kompensasi (bukan slip gaji)
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `currency` | `char(3)` | no | `'IDR'` | — |
+| `base_salary` | `numeric(15,2)` | no | — | Check `>= 0` |
+| `transport_allowance` | `numeric(15,2)` | no | `0` | Check `>= 0` |
+| `meal_allowance` | `numeric(15,2)` | no | `0` | Check `>= 0` |
+| `effective_from` | `date` | no | — | Saat create: `employment_start` |
+| `effective_to` | `date` | yes | — | — |
+| `created_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: partial unique `(employee_id) WHERE effective_to IS NULL`; `(employee_id, effective_from)`.
+- Check: nominal `>= 0`; `effective_to IS NULL OR effective_to >= effective_from`.
+- **Total tidak disimpan.** `total_monthly = base_salary + transport_allowance + meal_allowance` dihitung server dan hanya muncul di response.
+- Alasan: tabel ini adalah **paket** kompensasi; slip bulanan tetap milik domain `salary_statements` (v1.0.0). Memisahkan keduanya (ADR 0006) membuat perubahan kompensasi memiliki riwayat tanpa mengubah slip yang sudah terpublikasi.
+- Akses: dibatasi HR/payroll policy; employee melihat kompensasi sendiri hanya bila policy mengizinkan.
+
+#### `employee_invitations` — undangan registrasi wajah
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE CASCADE` |
+| `purpose` | `varchar(32)` | no | `'face_enrollment'` | Purpose lain menanti kebutuhan produk |
+| `token_hash` | `varchar(64)` | no | — | **Unique**; SHA-256 hex dari token 32-byte + pepper |
+| `status` | `varchar(32)` | no | `'pending'` | `pending`/`sent`/`accepted`/`expired`/`revoked` |
+| `requested_channels` | `jsonb` | no | `'["email","whatsapp"]'` | Pilihan HR |
+| `expires_at` | `timestamptz` | no | — | Default +3 hari (setelah `created_at`); API menerima 1–14 hari |
+| `sent_at` / `last_sent_at` | `timestamptz` | yes | — | Pengiriman pertama / terakhir |
+| `accepted_at` | `timestamptz` | yes | — | — |
+| `revoked_at` | `timestamptz` | yes | — | — |
+| `attempts` | `integer` | no | `0` | Jumlah percobaan enrollment |
+| `created_by` | `bigint` | no | — | FK `users.id`, `ON DELETE RESTRICT` |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: unique `token_hash`; partial unique `(employee_id, purpose) WHERE status IN ('pending','sent')`; index `status`, `expires_at`, `employee_id`.
+- Check: `expires_at > created_at`; `status IN (...)`.
+- Alasan: token asli hanya dikirim ke email/WhatsApp; yang disimpan hanya hash (ADR 0007). Tabel ini **tidak** menyimpan password atau data biometrik.
+
+#### `invitation_deliveries` — riwayat pengiriman per channel
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `invitation_id` | `bigint` | no | — | FK `employee_invitations.id`, `ON DELETE CASCADE` |
+| `channel` | `varchar(16)` | no | — | `email` / `whatsapp`; check |
+| `recipient` | `varchar(255)` | no | — | Email atau nomor E.164 pada saat kirim |
+| `provider` | `varchar(64)` | yes | — | Gateway yang dipakai; rancang abstraksi gateway, jangan hardcode |
+| `provider_message_id` | `varchar(255)` | yes | — | Untuk dedupe webhook |
+| `status` | `varchar(32)` | no | `'queued'` | `queued`/`sent`/`delivered`/`failed`/`bounced`; check |
+| `attempt` | `integer` | no | `1` | Per channel |
+| `error_code` | `varchar(64)` | yes | — | — |
+| `error_message` | `text` | yes | — | Sanitized, tanpa PII |
+| `sent_at` / `delivered_at` / `failed_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `(invitation_id, channel, status)`; unique `(invitation_id, channel, attempt)`.
+- Alasan: **status delivery per channel terpisah**; kegagalan satu channel tidak mempengaruhi channel lain, undangan, atau akun employee. Riwayat ini memungkinkan HR audit pengiriman.
+
+#### `face_templates` — template wajah (tanpa raw biometrik)
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `template_reference` | `varchar(255)` | no | — | Pointer ke private object storage / face provider |
+| `provider` | `varchar(64)` | yes | — | — |
+| `model_version` | `varchar(64)` | no | — | Versi model saat template dibuat |
+| `status` | `varchar(32)` | no | `'pending'` | `pending`/`active`/`failed`/`revoked`; check |
+| `quality_score` | `numeric(5,4)` | yes | — | — |
+| `metadata` | `jsonb` | yes | — | Tanpa image/embedding mentah |
+| `enrolled_at` | `timestamptz` | yes | — | — |
+| `revoked_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: partial unique `(employee_id) WHERE status = 'active'`; `(employee_id, status)`.
+- Alasan: hanya satu template aktif per employee; riwayat dipegang untuk audit/rollback. Tidak ada raw biometrik di DB tanpa keputusan eksplisit (ADR §12.2); jika embedding kelak perlu disimpan, wajib aturan enkripsi-at-rest, isolasi kunci, retensi, dan penghapusan yang didokumentasikan dalam ADR baru (open question §15.2).
+
+#### `audit_logs` — append-only log aksi consequential
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `actor_user_id` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `entity_type` | `varchar(100)` | no | — | Contoh `employee`, `invitation` |
+| `entity_id` | `varchar(64)` | yes | — | String agar menampung bigint id atau UUID external |
+| `action` | `varchar(100)` | no | — | Daftar minimal di bawah |
+| `before_snapshot` / `after_snapshot` | `jsonb` | yes | — | Tanpa password/token/face data |
+| `reason` | `text` | yes | — | — |
+| `ip_address` | `varchar(45)` | yes | — | — |
+| `user_agent` | `text` | yes | — | — |
+| `recorded_at` | `timestamptz` | no | `now()` | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `(entity_type, entity_id)`, `actor_user_id`, `recorded_at`.
+- Aksi minimal: `employee.created`, `employee.updated`, `employee.employment_status_changed`, `compensation.created`, `assignment.created`, `invitation.created`, `invitation.resent`, `invitation.revoked`, `invitation.accepted`, `face.enrolled`, `face.revoked`, `user.status_changed`, `password.reset`.
+- Alasan: append-only, dipisahkan dari `security_events` (ADR 0008); snapshot boleh memuat data personal keuangan/HR, tapi tidak pernah password/token/biometrik.
+
+#### `security_events` — telemetri autentikasi (tabel lama, ditambah event type)
+
+Struktur tetap: `id`, `event` (string), `actor_user_id`, `context` (jsonb), `timestamps`. Event type minimal: `login.succeeded`, `login.failed`, `logout`, `password.changed`, `password.reset.requested`, `invitation.accepted`, `face.enrollment.succeeded`, `face.enrollment.failed`. Password/token tidak pernah disimpan di tabel ini.
+
+#### SQL ringkas untuk constraint kunci
+
+```sql
+-- partial unique: tepat satu assignment/kompensasi aktif
+CREATE UNIQUE INDEX one_active_shift_assignment
+  ON employee_shift_assignments (employee_id) WHERE effective_to IS NULL;
+CREATE UNIQUE INDEX one_active_location_assignment
+  ON employee_work_location_assignments (employee_id) WHERE effective_to IS NULL;
+CREATE UNIQUE INDEX one_active_compensation
+  ON employee_compensations (employee_id) WHERE effective_to IS NULL;
+-- undangan aktif per purpose, dan satu template wajah aktif
+CREATE UNIQUE INDEX one_active_invitation
+  ON employee_invitations (employee_id, purpose) WHERE status IN ('pending','sent');
+CREATE UNIQUE INDEX one_active_face_template
+  ON face_templates (employee_id) WHERE status = 'active';
+```
+
+> Untuk test SQLite in-memory: partial unique index didukung SQLite; jika Laravel schema builder tidak nyaman, tulis migration dengan raw SQL. `jsonb` dipetakan ke text/JSON, dan jangan pakai `citext`/ENUM PostgreSQL (lihat §9.5).
 
 ---
 
@@ -703,6 +1341,33 @@ The exact domain must be chosen by the project team. Flutter and any HR dashboar
 | `POST` | `/attendance-correction-requests/{id}/decision` | HR decision on a correction request. |
 
 This endpoint list is a proposed starting point, not an implemented contract. Endpoint naming and request/response schemas should be settled in OpenAPI before parallel frontend/backend work accelerates.
+
+#### Endpoint baru v1.1 — Onboarding, Undangan, dan Auth — *baru di v1.1*
+
+Semua path di bawah memakai prefix `/api/v1`. Authorization HR diverifikasi lewat policy (bukan sekadar menyembunyikan tombol); role tidak pernah diterima dari payload.
+
+| Method | Endpoint | Aktor | Purpose |
+|---|---|---|---|
+| `POST` | `/api/v1/hr/employees` | HR | Create employee + akun + kompensasi + assignment shift/lokasi + undangan dalam satu transaksi (§7.5) |
+| `GET` | `/api/v1/hr/employees/{id}` | HR | Detail employee, kompensasi aktif, assignment aktif, status undangan |
+| `GET` | `/api/v1/hr/employees/create-options` | HR | Referensi untuk form: divisions, shifts, work locations, managers aktif |
+| `POST` | `/api/v1/hr/employees/{id}/invitations` | HR | Resend/rotate undangan aktif (token baru; token lama direvoke) |
+| `DELETE` | `/api/v1/hr/invitations/{id}` | HR | Revoke undangan |
+| `GET` | `/api/v1/hr/invitations/{id}` | HR | Status undangan + delivery per channel |
+| `POST` | `/api/v1/hr/employees/{id}/reset-password` | HR | Generate password sementara baru; ditampilkan sekali; `must_change_password=true` |
+| `POST` | `/api/v1/invitations/{token}/accept` | Employee (login) | Validasi undangan untuk employee yang sedang login |
+| `POST` | `/api/v1/face/enrollments` | Employee (login) | Enrollment wajah dengan token undangan |
+| `POST` | `/api/v1/auth/login` | Public | `identifier` (email ATAU `employee_number`) + `password` + `device_name` |
+| `POST` | `/api/v1/auth/change-password` | Authenticated | Untuk `must_change_password` / ganti password |
+| `POST` | `/api/v1/auth/forgot-password` | Public | Kirim link reset |
+| `POST` | `/api/v1/auth/reset-password` | Public (token) | Reset password dari link |
+| `GET` | `/api/v1/me` | Authenticated | Profil + employee summary + status face enrollment + `must_change_password` |
+
+Perubahan terhadap katalog lama:
+
+- `POST /register` bersifat **deprecated** (digantikan HR-only flow di `POST /hr/employees`); dijadwalkan dihapus setelah repo mobile bermigrasi.
+- `POST /auth/login` berubah bentuk request dari `email` menjadi `identifier` (§7.6); Flutter perlu pembaruan tipe request.
+- `POST /face/enrollments` pada v1.0.0 bebas konteks; kini wajib membawa token undangan yang valid dan hanya boleh untuk employee yang login — hal ini juga membalik siapa yang boleh meng-trigger enrollment (§9.3).
 
 ### 7.2 Example: Check-in Request
 
@@ -772,6 +1437,142 @@ A batch response should report results per event. One invalid event should not s
 
 All names and monetary values in this example are fictional and illustrative. The backend must derive or validate the net amount according to the approved payroll data source and rules.
 
+### 7.5 Example: Create Employee (HR) — *baru di v1.1*
+
+Request `POST /api/v1/hr/employees`:
+
+```json
+{
+  "full_name": "Putri Ramadhani",
+  "email": "putri.r@sinarmetrik.co.id",
+  "phone": "081227453318",
+  "division_id": 1,
+  "job_title": "Staf Admin Gudang",
+  "manager_id": 12,
+  "employment_start": "2026-10-12",
+  "employment_status": "probation",
+  "shift_id": 3,
+  "work_location_id": 2,
+  "compensation": {
+    "base_salary": 4800000,
+    "transport_allowance": 400000,
+    "meal_allowance": 550000
+  },
+  "send_invitation": true,
+  "invitation_channels": ["email", "whatsapp"],
+  "invitation_expires_in_days": 3
+}
+```
+
+Ketentuan request:
+
+- `employee_number` **tidak ada** di request — dibuat backend; `password` **tidak ada** di request — dibuat backend; `total_monthly` **tidak ada** di request — dihitung server.
+- `employment_status` opsional, default `probation`.
+- `phone` dinormalisasi ke E.164 oleh server (input HR boleh format `081227453318`).
+- `invitation_expires_in_days` default 3, rentang wajar 1–14.
+- Jika `invitation_channels` memuat `whatsapp`, `phone` wajib ada (error validasi `PHONE_REQUIRED` sejenis).
+- Idempotency: menerima header `Idempotency-Key` (format UUID) — replay mengembalikan hasil create pertama, bukan employee baru.
+
+Response `201`:
+
+```json
+{
+  "success": true,
+  "data": {
+    "employee": {
+      "id": 251,
+      "employee_number": "HM-0251",
+      "full_name": "Putri Ramadhani",
+      "work_email": "putri.r@sinarmetrik.co.id",
+      "phone_e164": "+6281227453318",
+      "division": { "id": 1, "name": "Operasional" },
+      "job_title": "Staf Admin Gudang",
+      "manager": { "id": 12, "full_name": "Budi Santoso", "employee_number": "HM-0012" },
+      "employment_start": "2026-10-12",
+      "employment_status": "probation"
+    },
+    "compensation": {
+      "base_salary": "4800000.00",
+      "transport_allowance": "400000.00",
+      "meal_allowance": "550000.00",
+      "total_monthly": "5750000.00",
+      "currency": "IDR"
+    },
+    "shift_assignment": { "shift_id": 3, "name": "Malam 21.00–06.00", "is_overnight": true, "effective_from": "2026-10-12" },
+    "work_location_assignment": { "work_location_id": 2, "name": "Gudang Kalasan", "effective_from": "2026-10-12" },
+    "invitation": {
+      "id": 88,
+      "status": "pending",
+      "requested_channels": ["email", "whatsapp"],
+      "expires_at": "2026-10-27T09:00:00Z",
+      "deliveries": [
+        { "channel": "email", "recipient": "putri.r@sinarmetrik.co.id", "status": "queued" },
+        { "channel": "whatsapp", "recipient": "+6281227453318", "status": "queued" }
+      ]
+    },
+    "initial_password": "R7$vQz2mKp9wXa4t",
+    "must_change_password": true
+  }
+}
+```
+
+- `initial_password` hanya muncul **satu kali** pada response create (dan pada response reset-password); tidak pernah disimpan plaintext, tidak dimasukkan ke log, tidak dibacakan lagi oleh `GET`.
+- `total_monthly` adalah hasil perhitungan server, bukan input.
+- Nilai dalam contoh fiktif; nomor `HM-0251` ilustratif untuk employee `id 251`.
+
+### 7.6 Contoh kontrak login & change-password — *baru di v1.1*
+
+`POST /api/v1/auth/login`:
+
+```json
+{ "identifier": "putri.r@sinarmetrik.co.id", "password": "R7$vQz2mKp9wXa4t", "device_name": "Android Pixel 7" }
+```
+
+Aturan:
+
+- `identifier` menerima email ATAU `employee_number` (`HM-0251`). Deteksi: ada `@` → email, selain itu dicocokkan ke `employees.employee_number`. Tidak ada field `username`.
+- Response sukses memuat `token`, `user`, dan `must_change_password`. Bila `must_change_password = true`, klien wajib mengarahkan ke halaman ganti password; endpoint lain selain `/auth/me`, `/auth/change-password`, `/auth/logout` menolak request dengan error `PASSWORD_CHANGE_REQUIRED`.
+- Error selalu `INVALID_CREDENTIALS` (401) untuk kredensial salah tanpa membocorkan informasi lain; `ACCOUNT_SUSPENDED` (403) hanya diterapkan setelah kecocokan kredensial terverifikasi (pola yang sama dipakai layanan umum).
+- Rate limit: throttle ketat per identifier + IP; percobaan dicatat sebagai `security_events.login.failed` (tanpa password).
+
+`POST /api/v1/auth/change-password`:
+
+```json
+{ "current_password": "R7$vQz2mKp9wXa4t", "new_password": "...", "new_password_confirmation": "..." }
+```
+
+Setelah sukses: `must_change_password` menjadi `false`, `security_events.password.changed`, dan token sesi saat ini tetap (bisa dianggap sesi baru secara keamanan, ikut kebijakan rotasi).
+
+### 7.7 Katalog error code minim — *baru di v1.1*
+
+| Code | Retryable? | Konteks |
+|---|---|---|
+| `EMPLOYEE_NUMBER_TAKEN` | no | Race di generator nomor urut (harus dicegah oleh unique index + retry internal) |
+| `EMAIL_TAKEN` | no | users/employees email unik |
+| `PHONE_TAKEN` | no | Employees phone unik |
+| `PHONE_REQUIRED` | no | Channel `whatsapp` dipilih tanpa `phone` |
+| `MANAGER_NOT_ACTIVE` | no | Manager terminated/suspended/tidak employee |
+| `MANAGER_SELF_REFERENCE` | no | Update employee berikut `manager_id = own id` |
+| `MANAGER_CYCLE` | no | Graf manager membentuk lingkaran (divalidasi aplikasi) |
+| `SHIFT_NOT_ACTIVE` / `WORK_LOCATION_NOT_ACTIVE` | no | Master data nonaktif |
+| `INVITATION_EXPIRED` | no | expires_at terlewati |
+| `INVITATION_REVOKED` | no | Sudah direvoke HR |
+| `INVITATION_ALREADY_USED` | no | Sudah accepted |
+| `INVITATION_EMPLOYEE_MISMATCH` | no | Bukan undangan milik employee yang sedang login |
+| `FACE_ENROLLMENT_REQUIRED` | no | Aksi presensi ditolak belum ada template wajah aktif (jika policy) |
+| `INVALID_CREDENTIALS` | no | Login gagal generik |
+| `ACCOUNT_SUSPENDED` | no | User suspended |
+| `PASSWORD_CHANGE_REQUIRED` | no | Guard terhadap endpoint selain change-password |
+
+Error tetap memakai envelope `success`/`message`/`errors` dari `docs/openapi/auth.yaml`; code diletakkan di `errors.code` (atau field export `code`) agar klien Flutter menampilkan pesan lokal.
+
+### 7.8 Dampak ke `docs/openapi/auth.yaml` — *baru di v1.1*
+
+- `LoginRequest` berubah dari `email`+`password` menjadi `identifier`+`password` (+ `device_name`); `AuthSuccessResponse.data` ditambah `must_change_password`.
+- `RegisterRequest` (`/register`) ditandai **deprecated**.
+- Schema tambahan: `CreateEmployeeRequest`, `CreateEmployeeResponse` (termasuk `initial_password` + status undangan/delivery), `InvitationResource`, `ChangePasswordRequest`, `ForgotPasswordRequest`, `ResetPasswordRequest`.
+- Versi kontrak dinaikkan (mis. `0.2.0`) dan `docs/openapi/README.md` diperbarui saat endpoint pertama dari desain ini diimplementasikan.
+
 ---
 
 ## 8. Offline Sync, Idempotency & Runtime Guardrails
@@ -812,6 +1613,7 @@ The local status `SYNCED` means the server has returned a result for the event. 
 - If the same event is submitted again, the API returns the recorded result rather than creating another attendance record.
 - The API validates employee ownership and rejects replay attempts that reuse an ID with materially different payload data.
 - State transitions and persistence should be transactional.
+- *Ditambah v1.1:* `POST /api/v1/hr/employees` dan pengiriman undangan juga idempotent — header `Idempotency-Key` (UUID/ULID) atau kunci `(invitation_id, channel, attempt)`; retry HR tidak membuat dua employee atau mengirim undangan ganda.
 
 ### 8.3 Retry, Timeout and Batch Limits
 
@@ -869,17 +1671,26 @@ Example conceptual response:
 
 This is only an illustrative shape. The actual model output and decisions must be calibrated and validated; a numeric threshold or a `match` value alone must never be assumed to establish liveness.
 
-### 9.3 Enrollment and Lifecycle
+### 9.3 Enrollment and Lifecycle — dirancang ulang di v1.1
 
-The enrollment process should define:
+Enrollment wajah kini **terikat undangan** (`employee_invitations`, purpose `face_enrollment`) yang dibuat HR bersamaan dengan create employee. Semua pertanyaan klasik di bawah ini dijawab oleh desain v1.1:
 
-- Who is permitted to enroll or re-enroll an employee.
-- How employee identity is checked before enrollment.
-- How capture quality is assessed.
-- Which model/version produced each template.
-- How templates are revoked or deleted after employment ends or consent/legal basis changes.
-- How model changes are evaluated and rolled out.
-- How false matches, failed matches, and exceptions are escalated to HR.
+| Pertanyaan desain (v1.0) | Keputusan v1.1 |
+|---|---|
+| Siapa yang boleh enroll / re-enroll? | Karyawan itu sendiri, hanya ketika **sedang login**. HR hanya membuat / re-send / revoke undangan; tidak ada enroll atas nama orang lain. Re-enrollment memakai undangan baru dengan purpose yang sama; partial unique memastikan hanya satu undangan aktif per purpose. |
+| Bagaimana identitas diverifikasi sebelum enroll? | Tiga lapis: (1) sesi login (email/`HM-###` + password, setelah menyelesaikan `must_change_password`), (2) validasi token undangan — hash cocok, belum expired/revoked/accepted, `employee_id` undangan = employee yang sedang login — constant-time compare, dan (3) pemeriksaan `face_templates` tidak ada yang `active`. |
+| Bagaimana kualitas capture dinilai? | `quality_score` dikembalikan `FaceVerificationProvider` saat enrollment; bila di bawah ambang, template `failed`, undangan tetap `pending`, bisa dicoba lagi sampai expiry. |
+| Model/version mana yang membuat template? | `face_templates.model_version` + `provider` tercatat per row; verifikasi presensi menolak template yang versinya tidak didukung (lihat v1.0.0 §9.4). |
+| Bagaimana template dicabut/dihapus? | `ACTIVE → REVOKED` saat terminasi/suspensi atau revoke wajah yang explicitly dilakukan HR; job housekeeping menghapus objek di private storage/face provider sesuai retensi (kebijakan waktu: §15.2). `face_registered_at` pada `employees` dipertahankan untuk kejelasan. |
+| Bagaimana penggantian model dievaluasi/roll-out? | Re-enrollment massal dilakukan lewat `invite` dengan batch undangan baru; rotasi per divisi/lokasi supaya tidak ada dua versi model dalam waktu terlalu lama. |
+| Bagaimana false match/exception ditangani? | Template `failed`/`revoked` dipertahankan sebagai riwayat + kejadian dicatat ke `security_events.face.enrollment.failed`; undangan `pending` bisa dicoba ulang; kasus tak terduga diarahkan ke antrean review HR. |
+
+Baris tambahan yang prudensial untuk diingat:
+
+- Link undangan **bukan** mekanisme login; karyawan harus login terlebih dahulu dan hanya kemudian bisa accept undangan miliknya sendiri (`INVITATION_EMPLOYEE_MISMATCH` bila mismatch).
+- Password sementara **tidak dikirim** di email/WhatsApp yang sama dengan link undangan (lihat §12.6); HR menyampaikannya lewat kanal terpisah.
+- Scheduler menandai undangan setelah lewat `expires_at`, tetapi endpoint accept tetap memvalidasi expiry supaya race aman.
+- Log audit minimal atas aksi biometrik: `face.enrolled`, `invitation.accepted`, plus `security_events.face.enrollment.succeeded|failed`.
 
 ### 9.4 Model Evaluation Requirements
 
@@ -893,6 +1704,44 @@ Evaluate at minimum:
 - Behavior under offline operation and model/version mismatch.
 
 Do not claim production-grade accuracy until these measures are tested on representative data.
+
+### 9.5 Rencana Migrasi Skema v1.1 — *baru di v1.1*
+
+Migration tetap terpusat di `database/migrations/` (ADR 0001). Urutan (setiap langkah punya `down()` yang reversible):
+
+1. `create_divisions_table`
+2. `create_shifts_table`
+3. Pastikan/ubah `work_locations` (tambah `timezone`, check latitude/longitude/radius; tabel ini mungkin sudah ada untuk presensi)
+4. `update_users_table` — tambah `status` (default `active`), `must_change_password` (default `true`), `last_login_at`
+5. `update_employees_table` — tambah `user_id` (unique, FK RESTRICT), `full_name`, `phone_e164`, `division_id` (FK), `job_title`, `employment_start`, `employment_status` (default `probation`), `face_registered_at`; hapus `position`, `division`, `is_active` **setelah** backfill
+6. `create_employee_shift_assignments_table`
+7. `create_employee_work_location_assignments_table`
+8. `create_employee_compensations_table`
+9. `create_employee_invitations_table`
+10. `create_invitation_deliveries_table`
+11. `update_face_templates_table` — tambah `quality_score`, `metadata`, `provider`; pastikan partial unique `one_active_face_template`
+12. `create_audit_logs_table`
+13. `update_security_events_table` — event type baru (indeks `event` sudah ada); tambah unique/per event bila perlu dedup
+14. `drop_invitation_codes_table`
+15. Seed: divisions, shifts (3 shift contoh), work_locations, user HR
+
+**Backfill (urutan setelah semua tabel jadi):**
+
+- `invitation_codes` lama **tidak dimigrasikan** — pre-production, aman dihapus (step 14).
+- Employee lama tanpa `user_id`: buat akun lewat flow HR yang sama (password sementara + wajib ganti saat login pertama) atau reset password manual; prosedurnya didokumentasikan bersama migration.
+- Employee lama dengan `division` string → map ke `divisions` (buat division bila tidak ada match, laporan mapping).
+- `position` → `job_title` (copy 1:1).
+- `is_active` → `employment_status`: `true` → `active`, `false` → `terminated` (keputusan mapping nontrivial lain dicatat bersama migration).
+- `phone` → `phone_e164` (dengan normalisasi + laporan nomor yang gagal normalisasi).
+- `users.email` lama → seragamkan ke lowercase.
+
+**Rollback:** setiap migration punya `down()`; rename kolom dilakukan dua-arah (ada backfill + script balik), `drop_invitation_codes` adalah langkah terakhir sehingga rollback lanjutan masih memungkinkan.
+
+**Kendala testing SQLite in-memory:**
+
+- Hindari `citext`, `ENUM`, dan fitur PostgreSQL-only. Lowercase email ditegaskan di aplikasi, bukan di DB.
+- Partial unique index: didukung SQLite; tulis raw SQL di migration bila builder kurang nyaman.
+- `jsonb` → kolom `json`/`text` pada SQLite; `time`, `date`, dan timestamp `timestamptz` didukung Laravel schema builder.
 
 ---
 
@@ -914,6 +1763,12 @@ Suggested roles or permission groups:
 | System administrator | Manage system-level configuration and roles; should not automatically receive unrestricted payroll access unless required. |
 
 A user may hold multiple permission groups. Exact roles and organizational scopes need product-owner approval.
+
+**Catatan v1.1:** untuk MVP, v1.1 memodelkan **role tunggal pada `users.role`** (`employee` / `hr` / `admin`) + policy berbasis permission per modul:
+- Registrasi/undangan/create-employee hanya untuk role `hr` (dan admin) — ditegakkan lewat policy, bukan UI.
+- Role selalu ditetapkan backend dan tidak pernah dibaca dari payload (atauran ini eksplisit sejak M1 di roadmap).
+- Employee/pengguna tanpa profil karyawan (mis. akun HR) tidak dapat melakukan enrollment maupun presensi sehingga data biometrik/kehadiran selalu milik profil karyawan yang valid.
+- Jika HR juga perlu berperan sebagai reviewer/approver task/request (sesuai tabel di atas), tambahkan permission granular tanpa mengubah kolom `role`.
 
 ### 10.2 Approval Gate Rules
 
@@ -1028,6 +1883,11 @@ HadirMetrik handles face biometrics, attendance times, possible location data, t
 - Database backups, tested restoration, monitoring, and incident-response procedures.
 - Dependency updates, CI tests, and security review before production.
 
+**Ditambahkan di v1.1:**
+
+- Login dengan rate limit ketat per identifier + IP, lockout bertingkat, pesan error generik, pencatatan `last_login_at`, dan `security_events` untuk setiap percobaan.
+- Password sementara: 16 karakter acak, ditampilkan sekali, hash Argon2id/bcrypt, tidak pernah di-log, wajib diganti saat login pertama (`must_change_password`).
+
 ### 12.2 Biometric Data
 
 - Decide whether the system needs raw face images, embeddings, or both.
@@ -1057,6 +1917,30 @@ HadirMetrik handles face biometrics, attendance times, possible location data, t
 ### 12.5 Regulatory Review
 
 Before production, review applicable Indonesian personal-data protection requirements, including **UU No. 27 Tahun 2022 tentang Pelindungan Data Pribadi**, and any other employment, payroll, or sector-specific requirements that apply to the organization. This document is an architecture proposal, not legal advice or a statement of completed compliance.
+
+### 12.6 Kredensial Sementara, Token Undangan, dan Pengiriman — *baru di v1.1*
+
+**Password sementara (HR create / reset-password):**
+
+- Dibuat sistem (bukan oleh HR), 16 karakter acak dari CSPRNG; ditampilkan **sekali** pada response create/reset; disimpan hanya sebagai hash (Argon2id/bcrypt).
+- Tidak pernah ditulis ke log — log aplikasi, `security_events`, `audit_logs`, dan log HTTP semuanya memfilter/masking field sensitif.
+- `must_change_password = true` memaksa pergantian password melalui `/auth/change-password` sebelum fitur lain dapat diakses (guard §5.9).
+- HR menyampaikannya lewat kanal terpisah (mis. panggilan/pertemuan langsung) — **tidak** dirangkai di email/WhatsApp undangan.
+
+**Token undangan:**
+
+- 32 byte random (CSPRNG); disimpan sebagai **hash SHA-256 + pepper** (pepper di environment server); perbandingan hash memakai constant-time compare.
+- One-time use; expiry default 3 hari; dapat direvoke; resend **merotasi** token (undangan lama menjadi `revoked`, dibuat undangan baru).
+- Link memakai `https://api.<domain>/…` dengan header `Referrer-Policy: no-referrer`, tidak muncul di analytics/log, dan disarankan pattern exchange: setelah employee login, token dipertukarkan dengan operasi server-side tanpa token tersentuh klien lagi.
+
+**Pengiriman (email/WhatsApp):**
+
+- Semua kirim memakai queue worker, idempotent per `(invitation_id, channel, attempt)`; retry membuat attempt baru.
+- Webhook delivery memverifikasi signature dan deduplikasi lewat `provider_message_id`.
+- Kegagalan satu channel tidak memengaruhi akun, undangan, atau employee — hanya status di `invitation_deliveries`.
+- Isi pesan tidak pernah memuat password; saran isi: nama karyawan, keterangan login dengan identifier (email/`employee_number`), batas waktu link undangan, dan instruksi registrasi wajah. PII dalam pesan dijaga seminimal mungkin.
+
+**Kepatuhan data:** wajah dapat dianggap data pribadi yang bersifat spesifik menurut UU No. 27/2022 — sehingga wajib ada alur consent saat onboarding, retensi/penghapusan template saat termination/revocation sesuai kebijakan retensi (open question §15.2), dan pencatatan audit yang dapat dipertanggungjawabkan (`audit_logs`: aktor, IP, user agent, before/after, reason).
 
 ---
 
@@ -1172,6 +2056,39 @@ The application description identifies the major features and primary users, but
 
 These decisions should be captured as Architecture Decision Records (ADRs) and reflected in the API contract and database migrations.
 
+### 15.1 Keputusan yang Difinalkan di v1.1 + ADR — *baru di v1.1*
+
+Keputusan final v1.1 dieksplisitkan dan masing-masing punya ADR:
+
+| Keputusan | ADR |
+|---|---|
+| PK `bigint` untuk semua tabel; `employee_number` business key unik, dibuat otomatis backend (format `HM-0251`), immutable, dipakai login | `docs/adr/0002-autogenerated-employee-number.md` |
+| Password sementara dibuat sistem, ditampilkan sekali, wajib ganti di login pertama; tidak dikirim bersama link undangan | `docs/adr/0003-system-generated-temporary-password.md` |
+| Registrasi HR-only; flow register publik lama dihapus/deprecated; akun dibuat oleh HR dalam satu transaksi bersama employee | §4.6 + ADR 0002 |
+| Divisi sebagai master table (`divisions`), FK pada `employees.division_id` | `docs/adr/0004-division-master-table.md` |
+| Assignment shift & lokasi dengan `effective_from`/`effective_to` (histori, satu aktif per jenis) | `docs/adr/0005-effective-dated-assignments.md` |
+| Kompensasi terpisah (`employee_compensations`), total dihitung server, terpisah dari `salary_statements` | `docs/adr/0006-compensation-packages-vs-salary-statements.md` |
+| Token undangan disimpan hash + pepper, one-time, revoke/rotation pada resend; delivery per channel | `docs/adr/0007-invitation-token-hash-and-rotation.md` |
+| Pemisahan `security_events` (telemetri auth) vs `audit_logs` (aksi consequential) | `docs/adr/0008-security-events-vs-audit-logs.md` |
+| Login pakai `identifier` (email ATAU `employee_number`); username bukan kredensial | ADR 0002 (identifier login) |
+
+Item lama di daftar §15 yang **belum** ditutup v1.1 tetap terbuka: HR client platform, topologi face recognition, liveness, offline policy, salary source of truth, dsb.
+
+### 15.2 Open Questions Baru (v1.1) — *baru di v1.1*
+
+| # | Pertanyaan | Rekomendasi |
+|---|---|---|
+| 1 | Apakah login diblokir sampai face enrollment selesai? | **Tidak.** Login boleh; presensi diblokir (`FACE_ENROLLMENT_REQUIRED`) sampai ada template aktif. Kontrasnya: fitur non-kehadiran tetap dipakai. |
+| 2 | Apakah email wajib diverifikasi? | Ya, disarankan; HR menetapkan email valid, verifikasi mengurangi salah-alamat undangan; `email_verified_at` sudah disiapkan. |
+| 3 | Apakah nomor WhatsApp wajib? | Wajib hanya bila channel WhatsApp dipilih di undangan; opsional bila hanya email. |
+| 4 | Provider WhatsApp apa? | Rancang abstraksi gateway generik (send + status callback + delivery report) dan pilih provider/WSP saat implementasi; jangan hardcode vendor. |
+| 5 | Apakah `employee_number` boleh diubah? | Tidak. Immutable; perubahan hanya lewat admin + audit. |
+| 6 | Satu employee punya banyak lokasi kerja? | Saat ini satu assignment aktif per jenis; multi-lokasi bisa ditambahkan nanti dengan menambah baris assignment — schema tidak perlu berubah. |
+| 7 | Payroll akan memakai komponen dinamis? | Bila ya, normalisasi `employee_compensations` menjadi tabel komponen (`compensation_components`) — desain saat ini sudah menjaga total server-side. |
+| 8 | Retensi face template & audit log? | Belum diputuskan; usulan: template wajah & objek dihapus saat termination/`revoked` + `N hari` untuk riwayat metadata; `audit_logs` disimpan minimal 5 tahun per kebutuhan pelaporan — perlu konfirmasi kebijakan HR/legal. |
+| 9 | HR reset password karyawan? | Ya, endpoint `POST /hr/employees/{id}/reset-password` telah diadakan: password sementara baru + tampil sekali + `must_change_password`; setiap reset tercatat di audit. |
+| 10 | Verifikasi dua langkah (OTP) untuk HR? | Belum diputuskan; slot dijadwalkan setelah M9 security review. |
+
 ---
 
 ## 16. Architecture Baseline Summary
@@ -1191,3 +2108,55 @@ The proposed baseline for HadirMetrik is:
 - **Privacy-by-design** for biometric, location, employment, and financial information.
 
 This is a production-minded starting point, not a claim that all features are already specified or implemented. Finalize the outstanding product decisions, then lock the API contracts, schema, and release acceptance criteria before large-scale parallel development.
+
+---
+
+## 17. Ringkasan Perubahan v1.1.0 & Acceptance Checklist — *baru di v1.1*
+
+### 17.1 Ringkasan perubahan
+
+| Section | Perubahan |
+|---|---|
+| Header | Versi → 1.1.0; status direvisi; catatan revisi + referensi ADR |
+| §4 | Flow baru 4.6–4.11: create employee HR (transaksi atomik), delivery email/WhatsApp + callback, login/ganti password/accept/enrollment, resend/revoke, scheduler expiry, terminasi |
+| §5 | State machine baru: invitation (5.6), delivery (5.7), face template (5.8), user (5.9), employment (5.10) + guard |
+| §6.1 | ERD diganti: PK bigint; ERD onboarding + ERD tertahan; `employee_number` business key |
+| §6.2 | Tabel kandidat → inti; daftar ubah/hapus (`invitation_codes` dihapus, `position`→`job_title`, dst.) |
+| §6.3 | Aturan integritas diperbarui (bigint, UTC, E.164, status string+check, hash token, tanpa soft delete) |
+| §6.4 | Spesifikasi lengkap tabel baru: users, employees, divisions, shifts, work_locations, shift/location assignment, compensations, invitations, deliveries, face_templates, audit_logs, security_events + SQL partial unique index |
+| §7 | Katalog endpoint v1.1 (HR + auth + undangan), contoh request/response create employee, katalog error code, dampak ke `auth.yaml` |
+| §8.2 | Idempotency create employee & pengiriman undangan |
+| §9.3 | Enrollment lifecycle berbasis undangan; kotak pertanyaan desain dijawab |
+| §9.5 | Rencana migrasi 15 langkah + backfill + rollback + kendala SQLite |
+| §10.1 | Role model MVP (role tunggal + policy) |
+| §12 | Baseline 12.1 + §12.6 kredensial sementara/token/delivery |
+| §15 | §15.1 keputusan final + ADR 0002–0008; §15.2 10 open questions |
+| ADR | File baru `docs/adr/0002…0008` |
+
+Yang **tidak** berubah: topologi deployment (§11), offline sync pattern (§8.1/8.3), evaluasi face model (§9.4), fase implementasi (§14) — desain onboarding ditempatkan sebagai jalur **M2 (identitas karyawan) + bagian M4 (enrollment wajah)** pada roadmap.
+
+### 17.2 Acceptance Checklist
+
+- [x] Semua field form “Tambah Karyawan” terpetakan ke tabel/kolom (nama→`employees.full_name`+`users.name`, email→`users.email`/`employees.work_email`, WA→`phone_e164`, divisi→`division_id`, jabatan→`job_title`, atasan→`manager_id`, tanggal mulai→`employment_start`, shift/lokasi→assignment `effective_from`, kompensasi→`employee_compensations`, undangan→`employee_invitations`).
+- [x] `employee_number` auto-generated (`HM-` + urut), unik, immutable, dipakai login (ADR 0002).
+- [x] Password sementara dibuat sistem, ditampilkan sekali di response create/reset, hash-only, `must_change_password=true` (ADR 0003).
+- [x] Undangan default 3 hari, toggle `send_invitation`, channel email/WhatsApp (default keduanya), expiry 1–14 hari.
+- [x] Atasan langsung, divisi, shift, lokasi, kompensasi dimodelkan (§6.4).
+- [x] Shift malam mendukung overnight (`is_overnight`, seed example 21:00–06:00).
+- [x] Geofence radius tersimpan di `work_locations`, bukan di employee.
+- [x] Total kompensasi dihitung server, tidak pernah dari client.
+- [x] Satu undangan aktif per `(employee_id, purpose)` — partial unique (SQL §6.4).
+- [x] Satu face template aktif per employee — partial unique (SQL §6.4).
+- [x] Assignment shift/lokasi/kompensasi memiliki histori `effective_from`/`effective_to`.
+- [x] State machine + guard lengkap (invitation, delivery, face template, user, employment).
+- [x] API & implikasi OpenAPI konsisten dengan ERD dan error code (§7.1, §7.5–7.8).
+- [x] Urutan migration + backfill + rollback jelas (§9.5).
+- [x] Tidak ada password/token plaintext di DB, respons, atau log (kecuali `initial_password` yang tampil sekali di response create/reset).
+- [x] Tidak ada raw biometrik di database tanpa keputusan eksplisit (ADR §12.2, open question §15.2).
+- [x] `audit_logs` (aksi consequential) & `security_events` (telemetri auth) terpisah sesuai fungsi (ADR 0008).
+- [x] Open questions dan ADR terdokumentasi (§15.1–15.2, `docs/adr/0002…0008`).
+
+### 17.3 Follow-up kontrak
+
+- Perbarui `docs/openapi/auth.yaml` (v0.2.0) mengikuti §7.8 saat implementasi M2 dimulai.
+- Roadmap: tulis ulang seksi Phase 2 (M2) memakai endpoint HR v1.1 dan tambahkan task unit/feature test sesuai guard §5–§6; endpoint lama `POST /register` dijadwalkan deprecated bertahap setelah repo mobile bermigrasi.

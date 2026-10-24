@@ -13,7 +13,7 @@ services:
     volumes:
       - hadirmetrik_pgdata:/var/lib/postgresql/data
       # These scripts execute only when PostgreSQL initializes an empty data directory.
-      - ./database/init:/docker-entrypoint-initdb.d:ro
+      # - ./database/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
         [
