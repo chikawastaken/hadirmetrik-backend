@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class EmployeeCompensation extends Model
 {
     protected $table = 'employee_compensations';
+
     protected function casts(): array
     {
         return [
