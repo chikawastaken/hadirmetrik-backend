@@ -58,11 +58,63 @@ class LoginTest extends TestCase
             ->assertJsonPath('message', 'Kredensial tidak valid.');
     }
 
-    public function test_login_requires_email_and_password(): void
+    public function test_login_requires_identifier_and_password(): void
     {
         $this->postJson('/api/v1/login', [])
             ->assertStatus(422)
             ->assertJsonPath('success', false)
-            ->assertJsonStructure(['errors' => ['email', 'password']]);
+            ->assertJsonStructure(['errors' => ['identifier', 'password']]);
+    }
+
+    public function test_employee_can_login_with_employee_number(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'karyawan@hadirmetrik.local',
+            'password' => 'rahasia123',
+            'status' => 'active',
+            'must_change_password' => true,
+        ]);
+
+        \App\Modules\Employees\Infrastructure\Models\Employee::create([
+            'user_id' => $user->id,
+            'employee_number' => 'HM-0001',
+            'full_name' => 'Karyawan Contoh',
+            'work_email' => 'karyawan@hadirmetrik.local',
+            'employment_status' => 'active',
+        ]);
+
+        $response = $this->postJson('/api/v1/login', [
+            'identifier' => 'HM-0001',
+            'password' => 'rahasia123',
+            'device_name' => 'Pixel 7',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.must_change_password', true)
+            ->assertJsonPath('data.user.email', 'karyawan@hadirmetrik.local');
+
+        $this->assertNotNull($user->fresh()->last_login_at);
+
+        $this->assertDatabaseHas('security_events', [
+            'event' => 'login.succeeded',
+            'actor_user_id' => $user->id,
+        ]);
+    }
+
+    public function test_login_rejects_suspended_account(): void
+    {
+        User::factory()->create([
+            'email' => 'suspended@hadirmetrik.local',
+            'password' => 'rahasia123',
+            'status' => 'suspended',
+        ]);
+
+        $this->postJson('/api/v1/login', [
+            'identifier' => 'suspended@hadirmetrik.local',
+            'password' => 'rahasia123',
+        ])
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'Your account has been suspended. Please contact HR.');
     }
 }

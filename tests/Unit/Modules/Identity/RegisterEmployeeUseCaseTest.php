@@ -164,6 +164,17 @@ final class FakeEmployeeDirectory implements EmployeeDirectory
     {
         return $this->byEmail[$workEmail] ?? null;
     }
+
+    public function findByEmployeeNumber(string $employeeNumber): ?EmployeeSummary
+    {
+        foreach ($this->byEmail as $employee) {
+            if ($employee->employeeNumber === $employeeNumber) {
+                return $employee;
+            }
+        }
+
+        return null;
+    }
 }
 
 final class FakeInvitationCodeConsumer implements InvitationCodeConsumer
@@ -228,6 +239,8 @@ final class FakeAccountRepository implements AccountRepository
 
         return new Account($this->lastId, $name, $email, $role, $status, $mustChangePassword);
     }
+
+    public function touchLastLogin(int $id): void {}
 }
 
 final class FakePasswordHasher implements PasswordHasher

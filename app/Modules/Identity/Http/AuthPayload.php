@@ -18,6 +18,7 @@ final class AuthPayload
         return [
             'token' => $result->token->token,
             'token_type' => $result->token->type,
+            'must_change_password' => $result->account->mustChangePassword,
             'user' => self::user($result->account),
         ];
     }

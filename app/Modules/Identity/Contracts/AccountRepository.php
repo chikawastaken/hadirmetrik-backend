@@ -25,4 +25,6 @@ interface AccountRepository
         string $status = 'active',
         bool $mustChangePassword = true,
     ): Account;
+
+    public function touchLastLogin(int $id): void;
 }

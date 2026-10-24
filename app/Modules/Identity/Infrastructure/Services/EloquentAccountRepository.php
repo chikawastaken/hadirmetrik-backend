@@ -61,4 +61,9 @@ final class EloquentAccountRepository implements AccountRepository
             (bool) $user->must_change_password,
         );
     }
+
+    public function touchLastLogin(int $id): void
+    {
+        User::query()->where('id', $id)->update(['last_login_at' => now()]);
+    }
 }

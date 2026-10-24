@@ -13,8 +13,10 @@ final class LoginController extends Controller
 {
     public function __invoke(LoginRequest $request, LoginUseCase $useCase): ApiResponse
     {
+        $identifier = (string) ($request->input('identifier') ?? $request->input('email'));
+
         $result = $useCase->execute(new LoginInput(
-            (string) $request->string('email'),
+            $identifier,
             (string) $request->string('password'),
             (string) ($request->input('device_name') ?? $request->userAgent() ?? 'unknown'),
         ));
