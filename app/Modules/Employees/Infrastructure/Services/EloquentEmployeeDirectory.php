@@ -24,4 +24,21 @@ final class EloquentEmployeeDirectory implements EmployeeDirectory
             $employee->employment_status !== 'terminated',
         );
     }
+
+    public function findByEmployeeNumber(string $employeeNumber): ?EmployeeSummary
+    {
+        $employee = Employee::query()->where('employee_number', $employeeNumber)->first();
+
+        if ($employee === null) {
+            return null;
+        }
+
+        return new EmployeeSummary(
+            $employee->id,
+            $employee->employee_number,
+            $employee->full_name,
+            $employee->work_email,
+            $employee->employment_status !== 'terminated',
+        );
+    }
 }

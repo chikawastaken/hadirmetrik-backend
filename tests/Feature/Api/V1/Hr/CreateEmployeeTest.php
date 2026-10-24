@@ -157,4 +157,25 @@ class CreateEmployeeTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+    public function test_employee_creation_returns_validation_error_for_inactive_division(): void
+    {
+        Sanctum::actingAs($this->hrUser);
+
+        $response = $this->postJson('/api/v1/hr/employees', [
+            'full_name' => 'Karyawan Baru',
+            'email' => 'baru@hadirmetrik.local',
+            'division_id' => 9999,
+            'job_title' => 'Staf',
+            'employment_start' => '2026-10-12',
+            'shift_id' => $this->shift->id,
+            'work_location_id' => $this->location->id,
+            'compensation' => ['base_salary' => 4800000],
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('message', 'Selected division is not found or inactive.')
+            ->assertJsonPath('errors.division_id.0', 'Selected division is not found or inactive.');
+    }
 }

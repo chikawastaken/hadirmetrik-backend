@@ -3,6 +3,7 @@
 namespace App\Modules\Employees\Application\CreateEmployee;
 
 use App\Modules\Audit\Contracts\AuditLogger;
+use App\Modules\Employees\Application\Exceptions\EmployeeCreationFailed;
 use App\Modules\Employees\Contracts\Data\CreateEmployeeInput;
 use App\Modules\Employees\Contracts\Data\CreateEmployeeResult;
 use App\Modules\Employees\Contracts\EmployeeCreator;
@@ -20,7 +21,6 @@ use App\Modules\Employees\Infrastructure\Models\InvitationDelivery;
 use App\Modules\Employees\Infrastructure\Models\Shift;
 use App\Modules\Employees\Infrastructure\Models\WorkLocation;
 use App\Shared\Contracts\TransactionManager;
-use App\Shared\Exceptions\ApiException;
 
 final class CreateEmployeeUseCase implements EmployeeCreator
 {
@@ -38,24 +38,24 @@ final class CreateEmployeeUseCase implements EmployeeCreator
         // 1. Validation checks
         $division = Division::query()->find($input->divisionId);
         if (! $division || ! $division->is_active) {
-            throw new ApiException('DIVISION_NOT_FOUND', 'Selected division is not found or inactive.', 422);
+            throw new EmployeeCreationFailed('division_id', 'Selected division is not found or inactive.');
         }
 
         $shift = Shift::query()->find($input->shiftId);
         if (! $shift || ! $shift->is_active) {
-            throw new ApiException('SHIFT_NOT_FOUND', 'Selected shift is not found or inactive.', 422);
+            throw new EmployeeCreationFailed('shift_id', 'Selected shift is not found or inactive.');
         }
 
         $location = WorkLocation::query()->find($input->workLocationId);
         if (! $location || ! $location->is_active) {
-            throw new ApiException('LOCATION_NOT_FOUND', 'Selected work location is not found or inactive.', 422);
+            throw new EmployeeCreationFailed('work_location_id', 'Selected work location is not found or inactive.');
         }
 
         $manager = null;
         if ($input->managerId !== null) {
             $manager = Employee::query()->find($input->managerId);
             if (! $manager || $manager->employment_status === 'terminated') {
-                throw new ApiException('MANAGER_NOT_FOUND', 'Selected manager is not found or inactive.', 422);
+                throw new EmployeeCreationFailed('manager_id', 'Selected manager is not found or inactive.');
             }
         }
 
@@ -75,7 +75,7 @@ final class CreateEmployeeUseCase implements EmployeeCreator
         }
 
         if ($input->sendInvitation && in_array('whatsapp', $input->invitationChannels, true) && empty($phoneE164)) {
-            throw new ApiException('PHONE_REQUIRED', 'Phone number is required when WhatsApp channel is selected.', 422);
+            throw new EmployeeCreationFailed('phone', 'Phone number is required when WhatsApp channel is selected.');
         }
 
         $initialPassword = $this->passwordGenerator->generate(16);
