@@ -1,13 +1,17 @@
 # HadirMetrik — AI Employee Attendance & Workforce Management: System Architecture
 
-**Document Version:** 1.1.0  
-**Status:** Revised Baseline — onboarding karyawan oleh HR, undangan registrasi wajah (email/WhatsApp), autentikasi identifier ± password, dan skema bigint  
+**Document Version:** 1.2.0  
+**Status:** Revised Baseline — v1.1 (onboarding HR, undangan wajah, identifier login, skema bigint) + v1.2 (skema penuh presensi, sync offline, koreksi, tugas, pengajuan, gaji, perangkat, notifikasi, lampiran)  
 **Target Stack:** Flutter / Dart, Laravel REST API, PostgreSQL, Redis (optional queue/cache), Python FastAPI for face-recognition inference (subject to model and deployment decisions), Docker, Nginx  
 **Architecture Style:** Polyrepo + Laravel Modular Monolith  
 **Primary Interface:** Mobile application  
 **Domain Strategy:** One root domain with a dedicated API subdomain; exact domain to be selected by the project team
 
 ---
+
+> **Revisi 1.2.0 (2026-10-24):** Merinci domain yang di v1.1 masih kasar, dengan acuan perilaku layar di repo Flutter `HadirMetrik` (Beranda/Clock, Riwayat, Tugas, Izin & Cuti, Slip Gaji, Notifikasi, HR Monitor, HR Penggajian, Pengaturan HR). Ada spesifikasi tabel lengkap untuk `attendance_records`, `attendance_verifications`, `attendance_correction_requests`, `sync_batches`, `devices`, `tasks`, `task_assignments`, `task_submissions`, `task_attachments`, `task_comments`, `administrative_requests`, `request_approvals`, `request_attachments`, `payroll_periods`, `salary_statements`, `salary_components`, `salary_publication_events`, dan `notifications`. ERD §6.1.2 diganti. Guard state machine server ditambahkan (§5.11–§5.16). Bagian lain yang diperbarui: endpoint dan error code (§7.1, §7.7, §7.9–§7.11), outbox dan kebijakan offline yang dipetakan ke tabel server (§8), rencana migrasi v1.2 (§9.6), privasi lokasi/lampiran/log (§12.7), ADR 0009–0014 (§15.3), open questions v1.2 (§15.4), serta ringkasan dan checklist (§18). Spesifikasi tabel identitas v1.1 di §6.4 **tidak diubah**, hanya dirujuk.
+>
+> ADR pendukung v1.2: `docs/adr/0009` … `0014`.
 
 > **Revisi 1.1.0 (2026-10-24):** Menambahkan desain registrasi karyawan yang bersifat **HR-only** (tanpa self-registration publik), pengiriman undangan registrasi wajah melalui **email dan/atau WhatsApp**, login dengan **email atau `employee_number` + password**, `employee_number` yang **dibuat otomatis** (format `HM-0251`), password sementara sistem yang ditampilkan sekali, master data divisi/shift/lokasi kerja, histori assignment dan kompensasi berbasis periode efektif, serta model undangan + delivery untuk audit. Semua PK diubah dari UUID ke **`bigint`**. Bagian yang direvisi pada dokumen ini ditulis dalam Bahasa Indonesia; bagian yang tidak disentuh tetap mempertahankan isi versi 1.0.0.
 >
@@ -533,6 +537,70 @@ sequenceDiagram
     Note over API,DB: Terminasi bersifat terminal di level HR; reaktivasi hanya lewat admin + audit (§5.10).
 ```
 
+### 4.12 Koreksi Presensi — *baru di v1.2*
+
+Di frontend, koreksi diajukan dari Riwayat (detail hari) atau dari sheet "Potongan keterlambatan". Pengajuan diteruskan ke atasan langsung lalu diputuskan HR attendance. Record presensi asli **tidak pernah diedit**: approval membuat record pengganti (ADR 0010).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Employee as Karyawan
+    actor HR as HR attendance
+    participant App as Client
+    participant API as Laravel API
+    participant DB as PostgreSQL
+
+    Employee->>App: Pilih hari di Riwayat → Ajukan Koreksi Kehadiran
+    App->>API: POST /api/v1/attendance-correction-requests (Idempotency-Key)
+    API->>API: Validasi: record milik employee login, tanggal ≤ batas koreksi, tidak ada koreksi aktif untuk record/tanggal yang sama
+    API->>DB: INSERT attendance_correction_requests (status=submitted)
+    API->>DB: audit_logs attendance_correction.submitted; notifications ke atasan/HR
+    API-->>App: 201 + status submitted
+
+    HR->>App: Buka antrean koreksi → Setujui / Tolak / Minta revisi
+    App->>API: POST /api/v1/attendance-correction-requests/{id}/decision
+    API->>API: Guard: status submitted/under_review, actor punya izin attendance-review, decision belum pernah diterapkan
+    API->>DB: BEGIN
+    alt approved
+        API->>DB: INSERT attendance_records (source=correction, supersedes_record_id=record asli, status=accepted, decision_source=review)
+        API->>DB: UPDATE attendance_correction_requests SET status=approved, result_record_id, decided_by, decided_at
+    else rejected / needs_revision
+        API->>DB: UPDATE attendance_correction_requests SET status, decision_note, decided_by, decided_at
+    end
+    API->>DB: audit_logs attendance_correction.decided (+ attendance.corrected bila approved)
+    API->>DB: COMMIT
+    API-->>App: Status terbaru; notifikasi ke karyawan
+```
+
+### 4.13 Penutupan dan Publikasi Periode Gaji — *baru di v1.2*
+
+Layar HR "Penggajian" bekerja per **periode** (Draft → Ditinjau → Disetujui → Dipublikasikan), dengan penandaan "Ditinjau" per karyawan dan satu tombol publikasi untuk seluruh karyawan (ADR 0012).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor HR as Payroll manager
+    participant UI as Klien HR
+    participant API as Laravel API
+    participant DB as PostgreSQL
+    participant Q as Queue Worker
+
+    HR->>UI: Buka Penggajian periode 2026-10
+    UI->>API: POST /api/v1/hr/payroll-periods/{id}/generate
+    API->>DB: Untuk tiap employee aktif: baca employee_compensations aktif, presensi accepted efektif, lembur approved
+    API->>DB: UPSERT salary_statements (draft) + salary_components; total dihitung server
+    HR->>UI: Tinjau karyawan bertanda (keterlambatan, lembur > 20 jam, penyesuaian manual)
+    UI->>API: POST /api/v1/hr/salary-statements/{id}/review
+    API->>DB: UPDATE salary_statements SET status=reviewed, reviewed_by, reviewed_at
+    UI->>API: POST /api/v1/hr/payroll-periods/{id}/approve
+    API->>API: Guard: semua statement periode reviewed
+    UI->>API: POST /api/v1/hr/payroll-periods/{id}/publish (Idempotency-Key)
+    API->>DB: BEGIN; statement reviewed → published; payroll_periods.status=published
+    API->>DB: INSERT salary_publication_events + audit_logs salary.published
+    API->>DB: COMMIT
+    API->>Q: Fan-out notifications "Slip gaji terbit" per employee
+```
+
 ---
 
 ## 5. Domain State Machines
@@ -625,6 +693,11 @@ This is a proposed workflow. If the system imports finalized payroll from anothe
 | Request | Submitted → approved/rejected/needs revision | HR approver | Request is in reviewable state; approval policy is satisfied. |
 | Salary statement | Draft/reviewed → published | Payroll-authorized HR | Period and statement are valid; actor has payroll permission. |
 | Employee | Any sensitive profile change | Authorized HR/admin | Policy and audit record are required. |
+| Attendance correction (*v1.2*) | Submitted → approved/rejected/needs revision | HR attendance | Request reviewable; approve membuat record pengganti dalam transaksi yang sama (§5.12). |
+| Task assignment (*v1.2*) | Under review → completed/revision required | Creator atau `task.review` | Submission `pending` milik assignment; rating/note sesuai keputusan (§5.14). |
+| Request approval step (*v1.2*) | Pending → approved/rejected/needs revision | Approver step aktif | Step berurutan; step sebelumnya `approved`/`skipped` (§5.15). |
+| Payroll period (*v1.2*) | Approved → published | Payroll approver | Semua statement `reviewed`; idempotent (§5.16). |
+| Device (*v1.2*) | Active → revoked | HR `device.manage` / pemilik (logout-all) | Token perangkat dicabut; audit `device.revoked`. |
 
 ### 5.6 Invitation State — *baru di v1.1*
 
@@ -711,6 +784,118 @@ Guard:
 - Karyawan `terminated` tidak muncul sebagai opsi manager aktif dan tidak dapat login.
 - Setiap perubahan status ditulis ke `audit_logs` (`employee.employment_status_changed`, before/after + reason).
 
+### 5.11 Attendance Record State (server) — *baru di v1.2*
+
+State §5.1 dipisah menjadi state **lokal** (klien) dan state **server**. Server hanya menyimpan tiga status; "review accepted/rejected" bukan status tersendiri, melainkan `status` final + `decision_source = 'review'` (ADR 0009).
+
+```text
+(insert) --> [ACCEPTED]                         decision_source = auto
+(insert) --> [REJECTED]                         decision_source = auto
+(insert) --> [PENDING_REVIEW] --> [ACCEPTED]    decision_source = review
+                              --> [REJECTED]    decision_source = review
+[ACCEPTED] --(koreksi approved)--> tetap ACCEPTED, tetapi di-supersede record baru (ADR 0010)
+```
+
+Guard:
+
+- Status awal diputuskan server dari hasil verifikasi wajah, geofence, integritas perangkat, dan kebijakan offline (§8.4); klien tidak pernah mengirim `status`.
+- Hanya `pending_review` yang boleh diputuskan oleh HR attendance (permission `attendance.review`); decision wajib `review_note` bila `rejected`.
+- `accepted`/`rejected` bersifat final untuk record itu; perubahan hanya lewat koreksi (§5.12) yang membuat record pengganti.
+- Event dengan `event_id` yang sama dikembalikan apa adanya (idempotent); `event_id` sama dengan `payload_hash` berbeda ditolak `IDEMPOTENCY_KEY_REUSED`.
+- Setiap keputusan review ditulis ke `audit_logs` (`attendance.reviewed`) tanpa koordinat presisi.
+
+Status harian di UI (`hadir`, `terlambat`, `absen`, `cuti`, `menunggu`) **tidak disimpan**; diturunkan dari record efektif + shift + pengajuan approved (§6.4 `attendance_records`).
+
+### 5.12 Attendance Correction Request State — *baru di v1.2*
+
+```text
+[SUBMITTED] --> [APPROVED]          (membuat record pengganti)
+[SUBMITTED] --> [REJECTED]
+[SUBMITTED] --> [NEEDS_REVISION] --> [SUBMITTED]
+[SUBMITTED] / [NEEDS_REVISION] --> [CANCELLED]   (oleh karyawan pemilik)
+```
+
+Guard:
+
+- Pengaju hanya karyawan pemilik record/tanggal; maksimal satu koreksi aktif (`submitted`/`needs_revision`) per `(employee_id, work_date)` — partial unique.
+- Approve/reject oleh HR attendance; atasan langsung menerima notifikasi dan dapat memberi catatan, tetapi keputusan final di HR (open question §15.4 bila atasan harus approve).
+- Approve dalam satu transaksi: insert record `source = 'correction'` + set `result_record_id`; decision kedua atas request yang sama ditolak `STATE_NOT_TRANSITIONABLE`.
+
+### 5.13 Sync Batch State — *baru di v1.2*
+
+```text
+[RECEIVING] --> [PROCESSED]
+[RECEIVING] --> [FAILED]      (error server; klien retry batch yang sama)
+```
+
+Guard:
+
+- `client_batch_id` unik per employee; retry batch yang sama mengembalikan hasil per event yang sudah tersimpan.
+- Hasil batch bersifat **per event** (§7.3); satu event ditolak tidak menggagalkan event lain.
+- Counter `accepted_count`/`rejected_count`/`pending_review_count` ditulis server setelah semua event diproses.
+
+### 5.14 Task Assignment & Submission State — *baru di v1.2*
+
+State §5.2 berlaku **per assignee** di `task_assignments.status`, bukan di `tasks` (ADR 0011). `tasks.status` hanya lifecycle header.
+
+```text
+tasks.status:            [DRAFT] --> [ASSIGNED] --> [CLOSED]
+                         [DRAFT]/[ASSIGNED] --> [CANCELLED]
+
+task_assignments.status: [ASSIGNED] --> [IN_PROGRESS] --> [SUBMITTED] --> [UNDER_REVIEW]
+                         [UNDER_REVIEW] --> [COMPLETED]
+                         [UNDER_REVIEW] --> [REVISION_REQUIRED] --> [IN_PROGRESS]
+                         (any non-terminal) --> [CANCELLED]   (task dibatalkan)
+
+task_submissions.review_status: [PENDING] --> [APPROVED] / [REVISION_REQUESTED]
+```
+
+Mapping UI: `proses` = `assigned`/`in_progress`; `review` (Menunggu) = `submitted`/`under_review`; `revisi` = `revision_required`; `selesai` = `completed`; `terlambat` diturunkan (`due_at < now()` dan belum `completed`).
+
+Guard:
+
+- Hanya assignee yang boleh submit; submission ditolak bila `tasks.requires_photo_proof = true` dan tidak ada lampiran `kind = 'evidence'` (`EVIDENCE_REQUIRED`).
+- Reviewer = pembuat task atau user dengan permission `task.review`; review wajib `review_rating` 1–5 bila `approved`, wajib `review_note` bila `revision_requested`.
+- Satu submission `pending` per assignment; decision kedua atas submission yang sama ditolak.
+- `tasks.status` menjadi `closed` otomatis saat semua assignment `completed`/`cancelled`.
+
+### 5.15 Administrative Request Approval Steps — *baru di v1.2*
+
+§5.3 tetap berlaku untuk header `administrative_requests.status`. Frontend menampilkan **dua langkah** (Atasan → HR), sehingga keputusan disimpan per langkah di `request_approvals`.
+
+```text
+request_approvals.status per step: [PENDING] --> [APPROVED] / [REJECTED] / [NEEDS_REVISION] / [SKIPPED]
+
+step 1 (supervisor) APPROVED --> step 2 (hr) PENDING
+step 2 (hr) APPROVED          --> header APPROVED
+step apa pun REJECTED         --> header REJECTED, step berikutnya SKIPPED
+step apa pun NEEDS_REVISION   --> header NEEDS_REVISION; resubmit membuat ronde step baru
+header SUBMITTED/UNDER_REVIEW --> CANCELLED (oleh karyawan, sebelum keputusan final)
+```
+
+Guard:
+
+- Hanya approver step aktif yang boleh memutuskan (atasan = `employees.manager_id` pengaju; HR = permission `request.approve`); keputusan atas step non-`pending` ditolak `STATE_NOT_TRANSITIONABLE`.
+- Lembur dengan setting "Lembur perlu persetujuan atasan" = off → step supervisor dibuat `skipped`.
+- Validasi server: alasan ≥ 10 karakter; izin maks 2/bulan; cuti tahunan ≤ sisa kuota (dari `day_count` approved tahun berjalan); sakit > 1 hari wajib lampiran surat dokter; izin dinas luar wajib surat tugas; cuti khusus maks 3 hari. Pelanggaran → `VALIDATION_FAILED` dengan field.
+- Bulk approve = loop per request dengan hasil per item; tidak ada approval massal tanpa jejak per step.
+
+### 5.16 Payroll Period & Device State — *baru di v1.2*
+
+```text
+payroll_periods.status:  [DRAFT] --> [REVIEWED] --> [APPROVED] --> [PUBLISHED]
+                         [REVIEWED]/[APPROVED] --> [DRAFT]   (dibuka ulang sebelum publish)
+
+devices.status:          [ACTIVE] --> [REVOKED]   (reset perangkat oleh HR / logout-all)
+```
+
+Guard:
+
+- `generate` hanya saat periode `draft`; `approve` hanya bila semua statement periode `reviewed`; `publish` hanya dari `approved`, idempotent, dan mem-publish seluruh statement `reviewed` dalam satu transaksi.
+- Setelah `published`, periode dan statement-nya **immutable**; perbaikan = statement versi baru (`supersedes_statement_id`) dan status lama `superseded` (§5.4).
+- Satu perangkat `active` per user — partial unique; login dari perangkat lain saat binding aktif ditolak `DEVICE_NOT_TRUSTED` dan dicatat `security_events` (`device.rejected`) (ADR 0013).
+- Reset perangkat oleh HR = set `revoked` + cabut token Sanctum milik perangkat tersebut; tercatat di `audit_logs` (`device.revoked`).
+
 ---
 
 ## 6. Domain Model & Persistence Schema
@@ -720,7 +905,7 @@ Guard:
 ERD v1.1 dibelah menjadi dua diagram agar tetap terbaca di GitHub:
 
 1. **ERD Onboarding & Identitas** — domain baru di v1.1: user, employee, master data divisi/shift/lokasi kerja, assignment, kompensasi, undangan + delivery, template wajah, audit, dan security events.
-2. **ERD Presensi, Tugas, Pengajuan & Gaji** — domain yang sudah ada sejak v1.0.0 dan **tetap dipertahanan**; hanya PK-nya yang dikonversi dari UUID ke `bigint`.
+2. **ERD Presensi, Tugas, Pengajuan & Gaji** — dirancang ulang penuh di v1.2 berdasarkan perilaku frontend Flutter: presensi + verifikasi + sync batch + koreksi, perangkat, tugas per assignee + lampiran + komentar, pengajuan + langkah approval + lampiran, periode gaji + slip beku + komponen + log publikasi, dan notifikasi.
 
 Keputusan utama skema (spesifikasi lengkap per tabel ada di §6.4):
 
@@ -888,119 +1073,266 @@ erDiagram
 
 Catatan diagram: `AUDIT_LOG` dipakai bersama oleh kedua domain; untuk space digambar sekali pada ERD ini. Relasi `USER`—`AUDIT_LOG` (actor) dan `USER`—`SECURITY_EVENT` (actor) berlaku juga untuk seluruh aksi presensi/tugas/gaji.
 
-#### 6.1.2 ERD Presensi, Tugas, Pengajuan & Gaji
+#### 6.1.2 ERD Presensi, Tugas, Pengajuan & Gaji — dirancang ulang di v1.2
 
 ```mermaid
 erDiagram
-    USER ||--o| EMPLOYEE : "authenticates_as"
+    EMPLOYEE ||--o{ DEVICE : "registers"
+    EMPLOYEE ||--o{ SYNC_BATCH : "uploads"
     EMPLOYEE ||--o{ ATTENDANCE_RECORD : "records"
-    EMPLOYEE ||--o{ TASK_ASSIGNMENT : "receives"
-    TASK ||--o{ TASK_ASSIGNMENT : "has"
-    TASK ||--o{ TASK_SUBMISSION : "receives"
-    EMPLOYEE ||--o{ TASK_SUBMISSION : "submits"
-    EMPLOYEE ||--o{ ADMINISTRATIVE_REQUEST : "submits"
-    EMPLOYEE ||--o{ SALARY_STATEMENT : "owns"
-    SALARY_STATEMENT ||--o{ SALARY_COMPONENT : "itemizes"
+    SYNC_BATCH ||--o{ ATTENDANCE_RECORD : "contains"
+    DEVICE ||--o{ ATTENDANCE_RECORD : "captured_on"
+    WORK_LOCATION ||--o{ ATTENDANCE_RECORD : "validated_against"
+    SHIFT ||--o{ ATTENDANCE_RECORD : "scheduled_by"
     ATTENDANCE_RECORD ||--o| ATTENDANCE_VERIFICATION : "verified_by"
-    WORK_LOCATION ||--o{ ATTENDANCE_RECORD : "used_for"
-    USER ||--o{ ADMINISTRATIVE_REQUEST : "reviews"
+    ATTENDANCE_RECORD ||--o| ATTENDANCE_RECORD : "superseded_by"
+    EMPLOYEE ||--o{ ATTENDANCE_CORRECTION_REQUEST : "submits"
+    ATTENDANCE_RECORD ||--o{ ATTENDANCE_CORRECTION_REQUEST : "corrected_by"
+    TASK ||--o{ TASK_ASSIGNMENT : "assigned_as"
+    EMPLOYEE ||--o{ TASK_ASSIGNMENT : "receives"
+    TASK_ASSIGNMENT ||--o{ TASK_SUBMISSION : "submits"
+    TASK ||--o{ TASK_ATTACHMENT : "has"
+    TASK_SUBMISSION ||--o{ TASK_ATTACHMENT : "evidences"
+    TASK ||--o{ TASK_COMMENT : "discussed_in"
     USER ||--o{ TASK : "creates"
+    EMPLOYEE ||--o{ ADMINISTRATIVE_REQUEST : "submits"
+    ADMINISTRATIVE_REQUEST ||--o{ REQUEST_APPROVAL : "approved_through"
+    ADMINISTRATIVE_REQUEST ||--o{ REQUEST_ATTACHMENT : "supported_by"
+    USER ||--o{ REQUEST_APPROVAL : "decides"
+    PAYROLL_PERIOD ||--o{ SALARY_STATEMENT : "groups"
+    EMPLOYEE ||--o{ SALARY_STATEMENT : "owns"
+    EMPLOYEE_COMPENSATION ||--o{ SALARY_STATEMENT : "basis_of"
+    SALARY_STATEMENT ||--o{ SALARY_COMPONENT : "itemizes"
+    SALARY_STATEMENT ||--o| SALARY_STATEMENT : "superseded_by"
+    PAYROLL_PERIOD ||--o{ SALARY_PUBLICATION_EVENT : "logs"
+    USER ||--o{ NOTIFICATION : "receives"
 
-    ATTENDANCE_RECORD {
+    DEVICE {
+        bigint id PK
+        bigint user_id FK
+        varchar device_uid "hash identifier perangkat"
+        varchar platform "android / ios"
+        varchar model
+        varchar os_version
+        varchar status "active / revoked"
+        timestamptz bound_at
+        timestamptz last_seen_at
+        timestamptz revoked_at
+    }
+    SYNC_BATCH {
         bigint id PK
         bigint employee_id FK
+        uuid client_batch_id UK "unik per employee"
+        integer event_count
+        integer accepted_count
+        integer rejected_count
+        integer pending_review_count
+        varchar status "receiving / processed / failed"
+        timestamptz received_at
+        timestamptz processed_at
+    }
+    ATTENDANCE_RECORD {
+        bigint id PK
+        uuid event_id UK "idempotency key"
+        varchar payload_hash "sha256 payload"
+        bigint employee_id FK
         bigint work_location_id FK
-        varchar event_type "check_in | check_out"
-        varchar status "accepted | pending_review | rejected | dsb"
-        timestamptz occurred_at "diklaim klien, tidak otoritatif"
-        timestamptz received_at "server time"
-        varchar source "online | offline_sync"
-        uuid event_id UK "idempotency external, tetap UUID/ULID"
-        varchar device_reference "nullable"
+        bigint shift_id FK
+        bigint device_id FK "nullable"
+        bigint sync_batch_id FK "nullable"
+        varchar event_type "check_in / check_out"
+        varchar status "accepted / pending_review / rejected"
+        varchar decision_source "auto / review"
+        varchar reason_code "nullable"
+        varchar source "online / offline_sync / correction"
+        varchar offline_policy "nullable"
+        timestamptz occurred_at "klaim klien"
+        timestamptz received_at "waktu server"
+        date work_date "tanggal kerja menurut shift"
+        numeric latitude
+        numeric longitude
+        numeric accuracy_m
+        integer distance_m
+        varchar location_status "inside / outside / unknown"
+        jsonb integrity_flags
+        numeric risk_score
+        bigint supersedes_record_id FK "UK, nullable"
+        bigint decided_by FK "users, nullable"
+        timestamptz decided_at
     }
     ATTENDANCE_VERIFICATION {
         bigint id PK
-        bigint attendance_record_id FK
-        varchar method
+        bigint attendance_record_id FK "UK"
+        varchar method "face"
+        varchar provider
         varchar model_version
         numeric match_score
         varchar liveness_status
-        varchar decision
+        varchar decision "match / no_match / inconclusive"
         jsonb metadata
         timestamptz verified_at
+    }
+    ATTENDANCE_CORRECTION_REQUEST {
+        bigint id PK
+        bigint employee_id FK
+        bigint attendance_record_id FK "nullable"
+        date work_date
+        varchar event_type
+        timestamptz requested_occurred_at
+        text reason
+        varchar status "submitted / approved / rejected / needs_revision / cancelled"
+        bigint result_record_id FK "nullable"
+        bigint decided_by FK "users"
+        timestamptz decided_at
     }
     TASK {
         bigint id PK
         bigint created_by FK "users"
+        bigint division_id FK "nullable"
         varchar title
         text description
-        varchar priority
-        varchar status
+        varchar priority "high / medium / low"
+        varchar status "draft / assigned / closed / cancelled"
+        boolean requires_photo_proof
+        jsonb checklist_template
         timestamptz due_at
     }
     TASK_ASSIGNMENT {
         bigint id PK
         bigint task_id FK
         bigint employee_id FK
-        varchar status
+        varchar status "assigned sampai completed"
         integer progress_percent
         timestamptz assigned_at
         timestamptz completed_at
     }
     TASK_SUBMISSION {
         bigint id PK
-        bigint task_id FK
-        bigint employee_id FK
+        bigint task_assignment_id FK
         text note
         jsonb checklist
-        jsonb evidence_references
-        varchar review_status
-        bigint reviewed_by FK "users, nullable"
+        varchar review_status "pending / approved / revision_requested"
+        smallint review_rating "1 sampai 5"
+        text review_note
+        bigint reviewed_by FK "users"
         timestamptz submitted_at
         timestamptz reviewed_at
+    }
+    TASK_ATTACHMENT {
+        bigint id PK
+        bigint task_id FK
+        bigint task_submission_id FK "nullable"
+        varchar kind "brief / evidence"
+        varchar object_key
+        varchar original_name
+        varchar mime_type
+        bigint size_bytes
+        varchar sha256
+    }
+    TASK_COMMENT {
+        bigint id PK
+        bigint task_id FK
+        bigint author_user_id FK
+        text body
+        timestamptz created_at
     }
     ADMINISTRATIVE_REQUEST {
         bigint id PK
         bigint employee_id FK
-        varchar request_type "cuti | izin | lembur"
+        varchar request_type "cuti / izin / lembur"
+        varchar category "tahunan / khusus / pribadi / sakit / dinas_luar"
         date start_date
         date end_date
+        varchar day_portion "full / morning / afternoon"
+        numeric day_count "dihitung server"
         numeric overtime_hours
         text reason
         varchar status
-        bigint reviewed_by FK "users"
-        text review_note
         timestamptz submitted_at
         timestamptz decided_at
     }
+    REQUEST_APPROVAL {
+        bigint id PK
+        bigint administrative_request_id FK
+        smallint round
+        smallint step_order
+        varchar approver_role "supervisor / hr"
+        bigint approver_user_id FK "nullable"
+        varchar status "pending / approved / rejected / needs_revision / skipped"
+        text note
+        timestamptz decided_at
+    }
+    REQUEST_ATTACHMENT {
+        bigint id PK
+        bigint administrative_request_id FK
+        varchar kind "doctor_note / assignment_letter / other"
+        varchar object_key
+        varchar mime_type
+        bigint size_bytes
+    }
+    PAYROLL_PERIOD {
+        bigint id PK
+        varchar period UK "YYYY-MM"
+        date starts_on
+        date ends_on
+        date pay_date
+        varchar status "draft / reviewed / approved / published"
+        bigint published_by FK "users"
+        timestamptz published_at
+    }
     SALARY_STATEMENT {
         bigint id PK
+        bigint payroll_period_id FK
         bigint employee_id FK
-        varchar payroll_period "contoh 2026-09"
-        numeric base_salary
-        numeric total_allowances
-        numeric overtime_amount
+        bigint employee_compensation_id FK
+        integer version
+        bigint supersedes_statement_id FK "UK, nullable"
+        numeric total_earnings
         numeric total_deductions
         numeric net_salary
-        varchar status
+        varchar status "draft / reviewed / published / superseded / cancelled"
         timestamptz published_at
     }
     SALARY_COMPONENT {
         bigint id PK
         bigint salary_statement_id FK
-        varchar component_type
+        varchar kind "earning / deduction"
+        varchar code
         varchar label
-        numeric amount
         text explanation
+        numeric quantity
+        numeric rate
+        numeric amount
+        varchar source "compensation / attendance / request / manual"
+    }
+    SALARY_PUBLICATION_EVENT {
+        bigint id PK
+        bigint payroll_period_id FK
+        bigint salary_statement_id FK "nullable"
+        varchar action "published / superseded / unpublished_blocked"
+        bigint actor_user_id FK
+        integer statement_count
+        timestamptz recorded_at
+    }
+    NOTIFICATION {
+        bigint id PK
+        bigint user_id FK
+        varchar category
+        varchar title
+        text body
+        jsonb data
+        timestamptz read_at
+        varchar push_status "pending / sent / failed / skipped"
+        timestamptz created_at
     }
 ```
 
-> Table `AUDIT_LOG`, `SECURITY_EVENT`, `WORK_LOCATION`, dan `EMPLOYEE` sudah ada di §6.1.1 dan berlaku untuk diagram ini juga (tidak digambar ulang). Untuk tabel domain presensi/tugas/gaji, kolom mengikuti definisi v1.0.0 dengan PK dikonversi ke `bigint`; perbedaan penting: `event_id` pada `attendance_records` tetap UUID sebagai idempotency key.
+> `USER`, `EMPLOYEE`, `SHIFT`, `WORK_LOCATION`, `EMPLOYEE_COMPENSATION`, `AUDIT_LOG`, dan `SECURITY_EVENT` didefinisikan di §6.1.1 dan tidak digambar ulang atributnya. Spesifikasi lengkap (tipe presisi, null, default, index, check) ada di §6.4 bagian v1.2. Tipe pada diagram disederhanakan agar Mermaid render di GitHub; tipe final mengikuti §6.4.
 
 
-### 6.2 Additional Tables to Consider
+### 6.2 Additional Tables to Consider — diperbarui di v1.2
 
-| Table | Status di v1.1 | Purpose |
+| Table | Status (v1.2) | Purpose |
 |---|---|---|
 | `divisions`, `shifts`, `work_locations` | **Dari kandidat → target tabel inti** | Master data organisasi: divisi, shift (termasuk overnight), lokasi kerja + geofence. Dibahas penuh di §6.4. |
 | `employee_shift_assignments`, `employee_work_location_assignments` | **Tabel inti baru** | Histori assignment dengan `effective_from`/`effective_to`; selalu ada tepat satu assignment aktif per jenis. |
@@ -1008,12 +1340,19 @@ erDiagram
 | `employee_invitations`, `invitation_deliveries` | **Tabel inti baru** | Menggantikan `invitation_codes`: undangan registrasi wajah per purpose + riwayat pengiriman per channel untuk audit. |
 | `face_templates` | Siap | Sekarang terikat invitation flow; hanya menyimpan `template_reference` (tanpa raw biometrik), dengan satu template `active` per employee. |
 | `audit_logs` | Siap | Append-only; pencatatan aksi HR/employee yang consequential (bukan telemetri auth — itu `security_events`). |
-| `devices` | Kandidat | Registrasi/perangkat tepercaya jika binding device diwajibkan. |
-| `sync_batches` | Kandidat | Pelacak batch sinkronisasi presensi offline. |
-| `attendance_correction_requests` | Kandidat | Koreksi presensi melalui workflow, bukan overwrite. |
-| `request_attachments`, `task_attachments` | Kandidat | Metadata dokumen/bukti di storage privat. |
-| `notifications` | Kandidat | Notifikasi in-app dan status pengirimannya. |
-| `salary_publication_events` | Kandidat | Log terpisah aksi publikasi payroll. |
+| `devices` | **Inti v1.2** (ADR 0013) | Frontend mengikat akun ke perangkat ("Perangkat ini akan terikat ke akunmu", toggle "Satu akun satu perangkat", aksi HR "Reset perangkat"). |
+| `sync_batches` | **Inti v1.2** (ADR 0009) | Pelacak batch upload offline; idempotent per `(employee_id, client_batch_id)`. |
+| `attendance_correction_requests` | **Inti v1.2** (ADR 0010) | Tombol "Ajukan Koreksi Kehadiran"; approval membuat record pengganti, record asli tidak diubah. |
+| `request_attachments`, `task_attachments` | **Inti v1.2** (ADR 0014) | Surat dokter/surat tugas, lampiran brief, dan foto bukti tugas; hanya metadata di DB, file di storage privat. |
+| `task_comments` | **Inti v1.2** | Frontend menampilkan thread komentar per tugas. |
+| `request_approvals` | **Inti v1.2** | Timeline dua langkah Atasan → HR; keputusan idempotent per langkah. |
+| `payroll_periods` | **Inti v1.2** (ADR 0012) | Layar Penggajian bekerja per periode (Draft → Ditinjau → Disetujui → Dipublikasikan) dan publikasi massal. |
+| `notifications` | **Inti v1.2** (ADR 0014) | Inbox in-app dengan kategori, read/unread, tandai semua dibaca, plus status push. |
+| `salary_publication_events` | **Inti v1.2** (ADR 0012) | Log append-only aksi publikasi/supersede payroll, terpisah dari `audit_logs` agar mudah diaudit per periode. |
+| `leave_balances` | **Ditolak untuk MVP** | Kuota dihitung dari `day_count` cuti tahunan approved; tabel saldo baru dibuat bila ada carry-over/accrual (open question §15.4). |
+| `notification_preferences` | **Ditunda** | Toggle preferensi di frontend; cukup kolom JSON di user settings atau tabel terpisah — open question §15.4. |
+| `salary_questions` | **Ditunda** | Form "Tanya soal gaji"; untuk MVP diarahkan ke kanal HR, tabel dibuat bila perlu tracking (open question §15.4). |
+| `attendance_daily_summaries` | **Ditolak untuk MVP** | Status harian diturunkan saat query; materialisasi hanya bila report lambat. |
 | `personal_access_tokens` (atau padanannya) | Ada | route Sanctum token; token dicabut saat suspend/terminate. |
 | `sessions`, `password_reset_tokens` | Ada (default Laravel) | Kredensial reset memakai tabel ini; token disimpan sebagai hash. |
 
@@ -1291,6 +1630,400 @@ CREATE UNIQUE INDEX one_active_face_template
 
 > Untuk test SQLite in-memory: partial unique index didukung SQLite; jika Laravel schema builder tidak nyaman, tulis migration dengan raw SQL. `jsonb` dipetakan ke text/JSON, dan jangan pakai `citext`/ENUM PostgreSQL (lihat §9.5).
 
+### 6.4.1 Spesifikasi Tabel Target v1.2 — Presensi, Perangkat, Tugas, Pengajuan, Gaji, Notifikasi — *baru di v1.2*
+
+Aturan §6.3 tetap berlaku. Tambahan v1.2:
+
+- `event_id` dan `client_batch_id` bertipe `uuid` di PostgreSQL dan `char(36)` di SQLite.
+- Kolom total/nilai turunan yang **disimpan** (slip gaji, `day_count`, `distance_m`) hanya ditulis server; klien tidak pernah mengirimnya.
+- Lampiran hanya menyimpan metadata + `object_key` ke private object storage; URL unduh berupa signed URL berumur pendek (§12.7).
+- Status harian presensi (`hadir`/`terlambat`/`absen`/`cuti`/`menunggu`) **tidak disimpan** — diturunkan dari record efektif, shift, dan pengajuan approved.
+
+#### `devices` — perangkat tepercaya
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `user_id` | `bigint` | no | — | FK `users.id`, `ON DELETE CASCADE` |
+| `device_uid_hash` | `varchar(64)` | no | — | SHA-256 dari identifier instalasi aplikasi; bukan IMEI |
+| `platform` | `varchar(16)` | no | — | `android` / `ios` |
+| `model` | `varchar(100)` | yes | — | Contoh "Samsung A54"; ditampilkan di insiden HR |
+| `os_version` | `varchar(32)` | yes | — | — |
+| `app_version` | `varchar(32)` | yes | — | — |
+| `status` | `varchar(16)` | no | `'active'` | `active` / `revoked` |
+| `bound_at` | `timestamptz` | no | `now()` | — |
+| `last_seen_at` | `timestamptz` | yes | — | Diperbarui saat login/sync |
+| `revoked_at` | `timestamptz` | yes | — | — |
+| `revoked_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `revoke_reason` | `varchar(255)` | yes | — | Contoh "Reset perangkat oleh HR" |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: partial unique `(user_id) WHERE status = 'active'`; `(user_id, device_uid_hash)`; `device_uid_hash`.
+- Check: `status IN ('active','revoked')`; `platform IN ('android','ios')`; `status = 'revoked'` ⇒ `revoked_at IS NOT NULL`.
+- Alasan: binding "satu akun satu perangkat" ditegakkan database; bila toggle organisasi dimatikan, aplikasi tetap mencatat perangkat tetapi tidak menolak login (setting di §15.4). Reset = revoke, tidak delete, agar histori insiden tetap terbaca.
+
+#### `sync_batches` — batch upload offline
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `device_id` | `bigint` | yes | — | FK `devices.id`, `ON DELETE SET NULL` |
+| `client_batch_id` | `uuid` | no | — | Dibuat klien; dipakai ulang saat retry |
+| `event_count` | `integer` | no | — | Check `1..100` (§8.3) |
+| `accepted_count` / `rejected_count` / `pending_review_count` | `integer` | no | `0` | Ditulis server |
+| `status` | `varchar(16)` | no | `'receiving'` | `receiving` / `processed` / `failed` |
+| `received_at` | `timestamptz` | no | `now()` | — |
+| `processed_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: unique `(employee_id, client_batch_id)`; `(status, received_at)`.
+- Check: `accepted_count + rejected_count + pending_review_count <= event_count`.
+- Alasan: memberi jejak "sinkron 3 presensi tertunda" di HR dan membuat retry batch idempotent tanpa mengandalkan hanya `event_id`.
+
+#### `attendance_records` — event presensi (append-only)
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `event_id` | `uuid` | no | — | **Unique**; idempotency key dari klien |
+| `payload_hash` | `varchar(64)` | no | — | SHA-256 payload kanonik; deteksi reuse `event_id` dengan isi berbeda |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `work_location_id` | `bigint` | no | — | FK `work_locations.id`, `ON DELETE RESTRICT`; dari assignment aktif saat `occurred_at` |
+| `shift_id` | `bigint` | no | — | FK `shifts.id`, `ON DELETE RESTRICT`; dari assignment aktif |
+| `device_id` | `bigint` | yes | — | FK `devices.id`, `ON DELETE SET NULL` |
+| `device_reference` | `varchar(64)` | yes | — | Salinan `device_uid_hash` saat capture (tetap ada walau device dihapus) |
+| `sync_batch_id` | `bigint` | yes | — | FK `sync_batches.id`, `ON DELETE SET NULL`; null bila online |
+| `event_type` | `varchar(16)` | no | — | `check_in` / `check_out` |
+| `work_date` | `date` | no | — | Tanggal kerja menurut shift (shift malam 21:00–06:00 → tanggal mulai) |
+| `occurred_at` | `timestamptz` | no | — | Klaim klien; tidak otoritatif |
+| `received_at` | `timestamptz` | no | `now()` | Waktu server |
+| `source` | `varchar(16)` | no | — | `online` / `offline_sync` / `correction` |
+| `offline_policy` | `varchar(32)` | yes | — | Snapshot kebijakan §8.4 yang dipakai: `accept_with_flags` / `review_required` / `reject` |
+| `status` | `varchar(16)` | no | — | `accepted` / `pending_review` / `rejected` |
+| `decision_source` | `varchar(16)` | no | `'auto'` | `auto` / `review` |
+| `reason_code` | `varchar(64)` | yes | — | Contoh `OUTSIDE_GEOFENCE`, `FACE_MISMATCH`, `MOCK_LOCATION`, `IMPOSSIBLE_TRAVEL`, `GPS_ACCURACY_LOW`, `ROOTED_DEVICE`, `ON_LEAVE` |
+| `latitude` / `longitude` | `numeric(9,6)` | yes | — | Check −90…90 / −180…180; null bila lokasi tak tersedia |
+| `accuracy_m` | `numeric(7,2)` | yes | — | Check `>= 0`; contoh 68 m → `GPS_ACCURACY_LOW` |
+| `distance_m` | `integer` | yes | — | Jarak ke pusat `work_locations`, dihitung server |
+| `location_status` | `varchar(16)` | no | `'unknown'` | `inside` / `outside` / `unknown`; radius dari `work_locations.geofence_radius_m` |
+| `integrity_flags` | `jsonb` | no | `'[]'` | Contoh `["mock_location","developer_mode","rooted","fake_gps_app","impossible_travel","clock_skew"]` |
+| `risk_score` | `numeric(4,3)` | yes | — | Check `0..1`; ≥ 0,8 ditampilkan "risiko tinggi" |
+| `supersedes_record_id` | `bigint` | yes | — | Self-FK, `ON DELETE RESTRICT`, **unique**; diisi bila `source = 'correction'` |
+| `correction_request_id` | `bigint` | yes | — | FK `attendance_correction_requests.id`, `ON DELETE RESTRICT` |
+| `decided_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL`; reviewer |
+| `decided_at` | `timestamptz` | yes | — | — |
+| `review_note` | `text` | yes | — | Wajib bila review `rejected` |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: unique `event_id`; unique `supersedes_record_id` (nullable); `(employee_id, work_date)`; `(status, received_at)` untuk antrean review; `sync_batch_id`; `(work_location_id, work_date)`.
+- Check: enum string di atas; `decision_source = 'review'` ⇒ `decided_by IS NOT NULL AND decided_at IS NOT NULL`; `source = 'correction'` ⇔ `correction_request_id IS NOT NULL`; `supersedes_record_id IS NOT NULL` ⇒ `source = 'correction'` (koreksi presensi yang hilang tidak punya record asli, ADR 0010); `status = 'rejected'` ⇒ `reason_code IS NOT NULL`.
+- **Record efektif** = record `accepted` yang tidak di-supersede oleh record lain (`NOT EXISTS ... WHERE r2.supersedes_record_id = r.id`). Laporan dan payroll hanya membaca record efektif.
+- Status harian (diturunkan): `hadir` bila check-in efektif ≤ `shift.start_time` + toleransi; `terlambat` bila lewat; `menunggu` bila hanya ada `pending_review`; `cuti` bila ada pengajuan cuti/izin approved; `absen` bila tidak ada semuanya pada hari kerja. Lembur dihitung bila check-out efektif ≥ `shift.end_time` + 30 menit dan ada pengajuan lembur approved (bila kebijakan mewajibkan).
+- Alasan: skema mendukung ketiga kebijakan §8.4 tanpa migrasi ulang (ADR 0009); record tidak pernah di-update kecuali kolom review pada `pending_review`, dan koreksi membuat record baru (ADR 0010). Tidak ada kolom radius, foto, atau embedding.
+
+#### `attendance_verifications` — hasil verifikasi wajah per record
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `attendance_record_id` | `bigint` | no | — | FK `attendance_records.id`, `ON DELETE CASCADE`, **unique** |
+| `method` | `varchar(16)` | no | `'face'` | Siap untuk metode lain |
+| `provider` | `varchar(64)` | no | — | Contoh `fastapi-face` |
+| `model_version` | `varchar(64)` | no | — | — |
+| `face_template_id` | `bigint` | yes | — | FK `face_templates.id`, `ON DELETE SET NULL` |
+| `match_score` | `numeric(5,4)` | yes | — | 0..1 (UI menampilkan 97,4%) |
+| `liveness_status` | `varchar(16)` | no | — | `passed` / `failed` / `not_checked` |
+| `quality_flags` | `jsonb` | no | `'[]'` | Contoh `["too_dark","multiple_faces"]` |
+| `decision` | `varchar(16)` | no | — | `match` / `no_match` / `inconclusive` |
+| `metadata` | `jsonb` | yes | — | Latensi, threshold; tanpa image/embedding |
+| `verified_at` | `timestamptz` | no | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Check: `match_score BETWEEN 0 AND 1`; enum string.
+- Alasan: unique biasa (bukan partial) — satu record tepat satu hasil verifikasi. Percobaan gagal di layar kamera (gelap, banyak wajah, liveness gagal) yang tidak menghasilkan event tidak masuk sini, tetapi ke `security_events` (`face.verification.failed`) agar HR melihat percobaan berulang.
+
+#### `attendance_correction_requests` — koreksi presensi
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `attendance_record_id` | `bigint` | yes | — | FK `attendance_records.id`, `ON DELETE RESTRICT`; null bila presensi tidak tercatat sama sekali |
+| `work_date` | `date` | no | — | — |
+| `event_type` | `varchar(16)` | no | — | `check_in` / `check_out` |
+| `requested_occurred_at` | `timestamptz` | no | — | Waktu yang diklaim benar |
+| `reason` | `text` | no | — | Min. 10 karakter (validasi aplikasi) |
+| `status` | `varchar(16)` | no | `'submitted'` | `submitted` / `approved` / `rejected` / `needs_revision` / `cancelled` |
+| `decided_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `decided_at` | `timestamptz` | yes | — | — |
+| `decision_note` | `text` | yes | — | — |
+| `result_record_id` | `bigint` | yes | — | FK `attendance_records.id`, `ON DELETE RESTRICT`, **unique**; record pengganti |
+| `submitted_at` | `timestamptz` | no | `now()` | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: partial unique `(employee_id, work_date, event_type) WHERE status IN ('submitted','needs_revision')`; `(status, submitted_at)`.
+- Check: `status = 'approved'` ⇔ `result_record_id IS NOT NULL`; `status IN ('approved','rejected')` ⇒ `decided_by IS NOT NULL`.
+- Alasan: pengajuan koreksi terpisah dari record supaya record asli tetap utuh untuk audit dan perhitungan potongan dapat ditelusuri.
+
+#### `tasks` — header tugas
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `created_by` | `bigint` | no | — | FK `users.id`, `ON DELETE RESTRICT`; HR/Supervisor/Atasan |
+| `division_id` | `bigint` | yes | — | FK `divisions.id`, `ON DELETE SET NULL` |
+| `title` | `varchar(255)` | no | — | — |
+| `description` | `text` | yes | — | — |
+| `priority` | `varchar(8)` | no | `'medium'` | `high` / `medium` / `low` (UI: tinggi/sedang/rendah) |
+| `status` | `varchar(16)` | no | `'draft'` | `draft` / `assigned` / `closed` / `cancelled` |
+| `requires_photo_proof` | `boolean` | no | `false` | Diisi dari setting org "Perlu bukti foto" saat create; bisa dioverride per tugas |
+| `checklist_template` | `jsonb` | no | `'[]'` | `[{"key":"c1","label":"..."}]` |
+| `due_at` | `timestamptz` | yes | — | — |
+| `cancelled_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `(status, due_at)`; `created_by`; `division_id`.
+- Check: enum string.
+
+#### `task_assignments` — status tugas per assignee
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `task_id` | `bigint` | no | — | FK `tasks.id`, `ON DELETE CASCADE` |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `status` | `varchar(24)` | no | `'assigned'` | `assigned` / `in_progress` / `submitted` / `under_review` / `revision_required` / `completed` / `cancelled` |
+| `progress_percent` | `smallint` | no | `0` | Check `0..100` |
+| `assigned_at` | `timestamptz` | no | `now()` | — |
+| `started_at` / `completed_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: unique `(task_id, employee_id)`; `(employee_id, status)`.
+- Check: `progress_percent BETWEEN 0 AND 100`; `status = 'completed'` ⇒ `completed_at IS NOT NULL`.
+- Alasan: frontend punya banyak assignee per tugas dengan progres masing-masing; state per assignment mencegah satu orang "menyelesaikan" tugas milik orang lain (ADR 0011).
+
+#### `task_submissions` — pengumpulan & review
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `task_assignment_id` | `bigint` | no | — | FK `task_assignments.id`, `ON DELETE CASCADE` |
+| `note` | `text` | yes | — | — |
+| `checklist` | `jsonb` | no | `'[]'` | `[{"key":"c1","done":true}]` snapshot saat submit |
+| `review_status` | `varchar(24)` | no | `'pending'` | `pending` / `approved` / `revision_requested` |
+| `review_rating` | `smallint` | yes | — | Check `1..5`; wajib bila `approved` |
+| `review_note` | `text` | yes | — | Wajib bila `revision_requested` (UI `revisionNote`) |
+| `reviewed_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `submitted_at` | `timestamptz` | no | `now()` | — |
+| `reviewed_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: partial unique `(task_assignment_id) WHERE review_status = 'pending'`; `(review_status, submitted_at)`.
+- Check: `review_status = 'approved'` ⇒ `review_rating IS NOT NULL`; `review_rating BETWEEN 1 AND 5`.
+- Alasan: kolom `evidence_references` v1.0.0 diganti tabel `task_attachments` agar metadata file dan akses bisa dikontrol.
+
+#### `task_attachments` — lampiran brief & bukti
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `task_id` | `bigint` | no | — | FK `tasks.id`, `ON DELETE CASCADE` |
+| `task_submission_id` | `bigint` | yes | — | FK `task_submissions.id`, `ON DELETE CASCADE`; wajib bila `kind = 'evidence'` |
+| `kind` | `varchar(16)` | no | — | `brief` / `evidence` |
+| `storage_disk` | `varchar(32)` | no | `'private'` | — |
+| `object_key` | `varchar(512)` | no | — | **Unique** |
+| `original_name` | `varchar(255)` | no | — | — |
+| `mime_type` | `varchar(100)` | no | — | Whitelist (jpg/png/pdf/docx/xlsx) |
+| `size_bytes` | `bigint` | no | — | Check `> 0 AND <= 10485760` |
+| `sha256` | `varchar(64)` | no | — | — |
+| `uploaded_by` | `bigint` | no | — | FK `users.id`, `ON DELETE RESTRICT` |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Check: `kind = 'evidence'` ⇔ `task_submission_id IS NOT NULL`.
+
+#### `task_comments` — diskusi tugas
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `task_id` | `bigint` | no | — | FK `tasks.id`, `ON DELETE CASCADE` |
+| `author_user_id` | `bigint` | no | — | FK `users.id`, `ON DELETE RESTRICT` |
+| `body` | `text` | no | — | Maks. 2000 karakter (aplikasi) |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `(task_id, created_at)`.
+- Alasan: komentar tidak diedit setelah 15 menit (aturan aplikasi) dan tidak dihapus keras; hanya pembuat task, assignee, dan reviewer yang boleh membaca/menulis.
+
+#### `administrative_requests` — cuti, izin, lembur
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `request_type` | `varchar(16)` | no | — | `cuti` / `izin` / `lembur` |
+| `category` | `varchar(24)` | yes | — | cuti: `tahunan` / `khusus`; izin: `pribadi` / `sakit` / `dinas_luar`; lembur: null |
+| `special_reason` | `varchar(24)` | yes | — | Cuti khusus: `menikah` / `duka` / `melahirkan` |
+| `start_date` / `end_date` | `date` | no | — | Check `end_date >= start_date` |
+| `day_portion` | `varchar(16)` | no | `'full'` | `full` / `morning` / `afternoon`; non-full hanya bila satu hari |
+| `day_count` | `numeric(4,1)` | yes | — | Dihitung server (hari kerja; 0,5 untuk setengah hari) |
+| `overtime_date` | `date` | yes | — | Wajib bila `lembur` |
+| `overtime_hours` | `numeric(4,2)` | yes | — | Check `> 0 AND <= 12`; wajib bila `lembur` |
+| `reason` | `text` | no | — | Min. 10 karakter |
+| `status` | `varchar(16)` | no | `'submitted'` | `draft` / `submitted` / `under_review` / `approved` / `rejected` / `needs_revision` / `cancelled` |
+| `submitted_at` | `timestamptz` | yes | — | — |
+| `decided_at` | `timestamptz` | yes | — | Keputusan final header |
+| `cancelled_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `(employee_id, request_type, start_date)`; `(status, submitted_at)`.
+- Check: kombinasi `request_type`/`category` valid; `day_portion <> 'full'` ⇒ `start_date = end_date`; `request_type = 'lembur'` ⇒ `overtime_hours IS NOT NULL`.
+- Kuota: sisa cuti tahunan = kuota (12, setting org) − Σ `day_count` cuti `tahunan` approved di tahun berjalan; dihitung server, tidak disimpan (lihat open question §15.4).
+- Alasan: `reviewed_by`/`review_note` v1.0.0 dipindah ke `request_approvals` karena ada dua langkah.
+
+#### `request_approvals` — langkah approval
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `administrative_request_id` | `bigint` | no | — | FK `administrative_requests.id`, `ON DELETE CASCADE` |
+| `round` | `smallint` | no | `1` | Naik setiap resubmit setelah `needs_revision` |
+| `step_order` | `smallint` | no | — | 1 = atasan, 2 = HR |
+| `approver_role` | `varchar(16)` | no | — | `supervisor` / `hr` |
+| `approver_user_id` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL`; ditetapkan saat step dibuat (atasan) atau saat diputuskan (HR) |
+| `status` | `varchar(16)` | no | `'pending'` | `pending` / `approved` / `rejected` / `needs_revision` / `skipped` |
+| `note` | `text` | yes | — | Alasan tolak (chip UI) |
+| `decided_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: unique `(administrative_request_id, round, step_order)`; `(approver_user_id, status)`.
+- Check: `status IN ('approved','rejected','needs_revision')` ⇒ `decided_at IS NOT NULL`; `status = 'rejected'` ⇒ `note IS NOT NULL`.
+
+#### `request_attachments` — dokumen pendukung pengajuan
+
+Struktur sama dengan `task_attachments` minus `task_id`/`task_submission_id`, ditambah `administrative_request_id` (FK `ON DELETE CASCADE`) dan `kind` `doctor_note` / `assignment_letter` / `other`.
+
+#### `payroll_periods` — periode penggajian
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `period` | `char(7)` | no | — | **Unique**, `YYYY-MM` |
+| `starts_on` / `ends_on` | `date` | no | — | Check `ends_on >= starts_on` |
+| `pay_date` | `date` | no | — | Default tanggal 25 (setting org) |
+| `status` | `varchar(16)` | no | `'draft'` | `draft` / `reviewed` / `approved` / `published` |
+| `approved_by` / `published_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `approved_at` / `published_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Check: `period ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'` (PostgreSQL; di SQLite validasi aplikasi); `status = 'published'` ⇒ `published_at IS NOT NULL`.
+
+#### `salary_statements` — slip gaji (beku setelah publish)
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `payroll_period_id` | `bigint` | no | — | FK `payroll_periods.id`, `ON DELETE RESTRICT` |
+| `employee_id` | `bigint` | no | — | FK `employees.id`, `ON DELETE RESTRICT` |
+| `employee_compensation_id` | `bigint` | no | — | FK `employee_compensations.id`, `ON DELETE RESTRICT`; paket yang dipakai |
+| `version` | `smallint` | no | `1` | — |
+| `supersedes_statement_id` | `bigint` | yes | — | Self-FK, `ON DELETE RESTRICT`, **unique** |
+| `currency` | `char(3)` | no | `'IDR'` | — |
+| `total_earnings` | `numeric(15,2)` | no | `0` | Σ komponen `earning`; ditulis server |
+| `total_deductions` | `numeric(15,2)` | no | `0` | Σ komponen `deduction`; ditulis server |
+| `net_salary` | `numeric(15,2)` | no | `0` | `total_earnings - total_deductions` |
+| `status` | `varchar(16)` | no | `'draft'` | `draft` / `reviewed` / `published` / `superseded` / `cancelled` |
+| `flags` | `jsonb` | no | `'[]'` | Contoh `["late_deduction","overtime_over_20h","manual_adjustment"]` |
+| `reviewed_by` | `bigint` | yes | — | FK `users.id`, `ON DELETE SET NULL` |
+| `reviewed_at` / `published_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: partial unique `(employee_id, payroll_period_id) WHERE status <> 'superseded' AND status <> 'cancelled'`; unique `supersedes_statement_id`; `(payroll_period_id, status)`.
+- Check: `net_salary = total_earnings - total_deductions`; semua nominal `>= 0` (net negatif ditolak saat generate dan ditandai untuk HR); `status = 'published'` ⇒ `published_at IS NOT NULL`.
+- Alasan: total disimpan (berbeda dengan `employee_compensations`) karena slip adalah **dokumen beku** — angka yang dilihat karyawan harus sama walau komponen/rumus berubah (ADR 0012). Teks terbilang dirender klien/PDF dari `net_salary`, tidak disimpan.
+
+#### `salary_components` — baris slip
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `salary_statement_id` | `bigint` | no | — | FK `salary_statements.id`, `ON DELETE CASCADE` |
+| `kind` | `varchar(16)` | no | — | `earning` / `deduction` |
+| `code` | `varchar(32)` | no | — | `base_salary`, `transport`, `meal`, `overtime`, `bonus`, `attendance_incentive`, `bpjs_kesehatan`, `bpjs_ketenagakerjaan`, `pph21`, `late_penalty`, `absence`, `manual_adjustment` |
+| `label` | `varchar(100)` | no | — | Contoh "Tunjangan Transport" |
+| `explanation` | `text` | yes | — | Contoh "20 hari × Rp 25.000"; "Koreksi lembur 3 Okt" |
+| `quantity` | `numeric(8,2)` | yes | — | Hari/jam/kali |
+| `rate` | `numeric(15,2)` | yes | — | Contoh Rp 40.000/jam lembur |
+| `amount` | `numeric(15,2)` | no | — | Check `>= 0`; tanda ditentukan `kind` |
+| `source` | `varchar(16)` | no | — | `compensation` / `attendance` / `request` / `manual` |
+| `source_ref` | `varchar(64)` | yes | — | Contoh id request lembur |
+| `sort_order` | `smallint` | no | `0` | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `(salary_statement_id, sort_order)`; unique `(salary_statement_id, code, source_ref)` (`source_ref` NULL boleh berulang — perilaku standar unique).
+- Check: `source = 'manual'` ⇒ `explanation IS NOT NULL`.
+
+#### `salary_publication_events` — log publikasi payroll (append-only)
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `payroll_period_id` | `bigint` | no | — | FK `payroll_periods.id`, `ON DELETE RESTRICT` |
+| `salary_statement_id` | `bigint` | yes | — | FK `salary_statements.id`, `ON DELETE RESTRICT`; null untuk aksi level periode |
+| `action` | `varchar(32)` | no | — | `period.published` / `statement.published` / `statement.superseded` |
+| `actor_user_id` | `bigint` | no | — | FK `users.id`, `ON DELETE RESTRICT` |
+| `statement_count` | `integer` | yes | — | Jumlah slip pada publikasi periode (contoh 214) |
+| `idempotency_key` | `uuid` | yes | — | **Unique**; dari header `Idempotency-Key` |
+| `recorded_at` | `timestamptz` | no | `now()` | — |
+
+- Alasan: tidak ada `updated_at`; aplikasi tidak pernah update/delete.
+
+#### `notifications` — inbox in-app
+
+| Kolom | Tipe | Null | Default | Catatan |
+|---|---|---|---|---|
+| `id` | `bigint` PK | no | — | — |
+| `user_id` | `bigint` | no | — | FK `users.id`, `ON DELETE CASCADE` |
+| `category` | `varchar(16)` | no | — | `absensi` / `tugas` / `gaji` / `pengajuan` / `keamanan` / `pengumuman` / `pengingat` / `revisi` |
+| `title` | `varchar(255)` | no | — | — |
+| `body` | `text` | yes | — | Tanpa nominal gaji/koordinat |
+| `data` | `jsonb` | yes | — | Deep link: `{"type":"task","id":123}` |
+| `read_at` | `timestamptz` | yes | — | — |
+| `push_status` | `varchar(16)` | no | `'pending'` | `pending` / `sent` / `failed` / `skipped` |
+| `push_sent_at` | `timestamptz` | yes | — | — |
+| `created_at`, `updated_at` | `timestamptz` | no | `now()` | — |
+
+- Index: `(user_id, read_at, created_at DESC)`; `(push_status) WHERE push_status = 'pending'` (PostgreSQL partial).
+- Alasan: tidak memakai tabel `notifications` bawaan Laravel (UUID PK + morph) agar konsisten dengan aturan PK `bigint` (ADR 0014). "Tandai semua dibaca" = satu `UPDATE ... SET read_at = now() WHERE user_id = ? AND read_at IS NULL`.
+
+#### SQL ringkas v1.2
+
+```sql
+-- satu perangkat aktif per user
+CREATE UNIQUE INDEX one_active_device ON devices (user_id) WHERE status = 'active';
+-- satu koreksi aktif per hari + jenis event
+CREATE UNIQUE INDEX one_open_correction
+  ON attendance_correction_requests (employee_id, work_date, event_type)
+  WHERE status IN ('submitted','needs_revision');
+-- satu submission menunggu review per assignment
+CREATE UNIQUE INDEX one_pending_submission
+  ON task_submissions (task_assignment_id) WHERE review_status = 'pending';
+-- satu slip hidup per employee per periode
+CREATE UNIQUE INDEX one_live_statement
+  ON salary_statements (employee_id, payroll_period_id)
+  WHERE status NOT IN ('superseded','cancelled');
+-- integritas slip
+ALTER TABLE salary_statements ADD CONSTRAINT net_matches
+  CHECK (net_salary = total_earnings - total_deductions);
+-- koreksi selalu berasal dari pengajuan; record asli opsional (presensi hilang)
+ALTER TABLE attendance_records ADD CONSTRAINT correction_has_request
+  CHECK ((source = 'correction') = (correction_request_id IS NOT NULL));
+ALTER TABLE attendance_records ADD CONSTRAINT supersede_only_by_correction
+  CHECK (supersedes_record_id IS NULL OR source = 'correction');
+```
+
+> SQLite: semua partial unique index di atas didukung; `uuid` → `char(36)`, `jsonb` → `text`, regex check `period` divalidasi di aplikasi. Indeks `DESC` dan partial index non-unique pada `notifications` boleh dilewati di SQLite.
+
 ---
 
 ## 7. API Design & Typed Contracts
@@ -1369,6 +2102,68 @@ Perubahan terhadap katalog lama:
 - `POST /auth/login` berubah bentuk request dari `email` menjadi `identifier` (§7.6); Flutter perlu pembaruan tipe request.
 - `POST /face/enrollments` pada v1.0.0 bebas konteks; kini wajib membawa token undangan yang valid dan hanya boleh untuk employee yang login — hal ini juga membalik siapa yang boleh meng-trigger enrollment (§9.3).
 
+#### Endpoint baru v1.2 — Presensi, Sync, Koreksi, Tugas, Pengajuan, Gaji, Perangkat, Notifikasi — *baru di v1.2*
+
+Semua path memakai prefix `/api/v1`, envelope `success`/`message`/`errors`, dan **object-level authorization**: employee hanya dapat membaca/menulis resource miliknya; endpoint `/hr/*` membutuhkan permission spesifik. Endpoint mutasi menerima `Idempotency-Key` (UUID).
+
+| Method | Endpoint | Aktor | Purpose |
+|---|---|---|---|
+| `GET` | `/attendance/today` | Employee | Shift, lokasi kerja + radius, status hari ini, check-in/out efektif |
+| `POST` | `/attendance/events` | Employee | Check-in/out online (§7.9); `event_type` di body, menggantikan `/attendance/check-in` + `/check-out` |
+| `GET` | `/attendance/records?month=YYYY-MM` | Employee | Riwayat + status harian turunan |
+| `POST` | `/sync/attendance-batches` | Employee | Upload batch offline (`client_batch_id` + maks. 100 event); hasil per event (§7.3) |
+| `GET` | `/sync/attendance-batches/{client_batch_id}` | Employee | Ambil hasil batch yang sama saat retry/timeout |
+| `POST` | `/attendance-correction-requests` | Employee | Ajukan koreksi |
+| `GET` | `/attendance-correction-requests` | Employee | Daftar koreksi milik sendiri |
+| `POST` | `/attendance-correction-requests/{id}/cancel` | Employee | Batalkan sebelum diputuskan |
+| `GET` | `/hr/attendance/review-queue` | HR attendance | Record `pending_review` + insiden (risk score, sinyal, device) |
+| `POST` | `/hr/attendance/records/{id}/decision` | HR attendance | Putuskan `accepted`/`rejected` + `review_note` |
+| `POST` | `/hr/attendance-correction-requests/{id}/decision` | HR attendance | `approved`/`rejected`/`needs_revision` |
+| `GET` | `/hr/attendance/live?date=` | HR attendance | Entri live: status geofence + jarak (tanpa koordinat presisi kecuali permission `attendance.location.view`) |
+| `GET` | `/tasks` | Employee | Assignment milik sendiri (filter status UI) |
+| `GET` | `/tasks/{id}` | Assignee/creator/reviewer | Detail + checklist + komentar + lampiran |
+| `POST` | `/tasks/{id}/start` | Assignee | `assigned` → `in_progress` |
+| `PATCH` | `/tasks/{id}/progress` | Assignee | `progress_percent` + checklist draft |
+| `POST` | `/tasks/{id}/submissions` | Assignee | Submit (lampiran evidence via `attachment_ids`) |
+| `POST` | `/tasks/{id}/comments` | Assignee/creator/reviewer | Komentar |
+| `POST` | `/tasks/{id}/attachments` | Assignee/creator | Upload lampiran (multipart) → metadata |
+| `POST` | `/hr/tasks` | HR/Supervisor/Atasan (`task.create`) | Buat + assign ke banyak employee |
+| `POST` | `/hr/task-submissions/{id}/review` | Reviewer | `approved` + rating 1–5, atau `revision_requested` + note (§7.10) |
+| `POST` | `/hr/tasks/{id}/cancel` | Creator/HR | Batalkan tugas |
+| `GET` | `/administrative-requests/summary` | Employee | Sisa kuota cuti, jumlah izin bulan ini |
+| `POST` | `/administrative-requests` | Employee | Ajukan cuti/izin/lembur |
+| `POST` | `/administrative-requests/{id}/attachments` | Employee | Surat dokter/surat tugas |
+| `POST` | `/administrative-requests/{id}/cancel` | Employee | Batalkan |
+| `POST` | `/administrative-requests/{id}/resubmit` | Employee | Setelah `needs_revision` |
+| `GET` | `/approvals/requests` | Atasan/HR | Antrean step `pending` milik aktor + info bentrok ("2 orang di Penjualan juga cuti") |
+| `POST` | `/approvals/requests/{id}/decision` | Approver step aktif | Keputusan per step (menggantikan `/administrative-requests/{id}/decision`) |
+| `POST` | `/approvals/requests/bulk-decision` | Approver | Bulk approve; hasil per item |
+| `GET` | `/salary-statements` | Employee | Hanya statement `published` milik sendiri |
+| `GET` | `/salary-statements/{id}` | Employee pemilik | Detail slip + komponen (§7.4) |
+| `GET` | `/salary-statements/{id}/pdf` | Employee pemilik | Signed URL PDF berumur pendek |
+| `POST` | `/hr/payroll-periods` | Payroll | Buat periode |
+| `POST` | `/hr/payroll-periods/{id}/generate` | Payroll | Hitung draft statement seluruh employee aktif |
+| `GET` | `/hr/payroll-periods/{id}/statements` | Payroll | Daftar + flag |
+| `POST` | `/hr/salary-statements/{id}/adjustments` | Payroll | Komponen `manual` (wajib explanation) |
+| `POST` | `/hr/salary-statements/{id}/review` | Payroll | "Tandai Ditinjau" |
+| `POST` | `/hr/payroll-periods/{id}/approve` | Payroll approver | Semua statement `reviewed` |
+| `POST` | `/hr/payroll-periods/{id}/publish` | Payroll approver | Publikasi massal, idempotent (§7.11) |
+| `POST` | `/hr/salary-statements/{id}/publish` | Payroll approver | Publikasi satu statement (koreksi/susulan) |
+| `POST` | `/hr/salary-statements/{id}/supersede` | Payroll approver | Buat versi baru dari statement `published` |
+| `GET` | `/devices` | Authenticated | Perangkat milik sendiri |
+| `POST` | `/hr/users/{id}/devices/reset` | HR (`device.manage`) | Revoke perangkat aktif + token |
+| `GET` | `/notifications?cursor=` | Authenticated | Inbox |
+| `POST` | `/notifications/{id}/read` | Pemilik | Tandai dibaca |
+| `POST` | `/notifications/read-all` | Pemilik | Tandai semua dibaca |
+
+Perubahan terhadap katalog lama (v1.2):
+
+- `/attendance/check-in` dan `/attendance/check-out` digabung menjadi `POST /attendance/events`; `/sync/attendance` diganti `/sync/attendance-batches`.
+- `/administrative-requests/{id}/decision` diganti `/approvals/requests/{id}/decision` karena keputusan sekarang per langkah.
+- `/tasks/{id}/review` dipindah ke `/hr/task-submissions/{id}/review` karena review terikat submission, bukan task.
+- `/hr/salary-statements/import` tetap opsional dan di luar cakupan v1.2.
+- `GET /me` (v1.1) dan `GET /bootstrap` menjadi referensi klien: `must_change_password`, `face_enrollment_status`, `device_binding` (`required`, `trusted`), dan `policy_versions` (`attendance`, `offline`, `payroll`) beserta setting yang dibutuhkan UI (radius lokasi, kuota cuti, batas izin, toleransi telat).
+
 ### 7.2 Example: Check-in Request
 
 ```http
@@ -1401,19 +2196,23 @@ The fields above are illustrative. Location and face-verification fields must be
 
 ```json
 {
-  "data": [
-    {
-      "event_id": "55b3f4fc-267a-4ef8-9c38-8c351cfe7f70",
-      "status": "pending_review",
-      "server_received_at": "2026-10-19T01:05:02Z",
-      "reason_code": "OFFLINE_EVENT_REQUIRES_REVIEW"
-    }
-  ],
-  "next_cursor": "attendance-sync-cursor"
+  "success": true,
+  "data": {
+    "client_batch_id": "b0c1e7a2-1f7e-4a8e-9d55-0c2f9a1d3e44",
+    "status": "processed",
+    "counts": { "accepted": 1, "pending_review": 1, "rejected": 1 },
+    "events": [
+      { "event_id": "55b3f4fc-267a-4ef8-9c38-8c351cfe7f70", "result": "pending_review", "record_id": 9012, "reason_code": "OFFLINE_EVENT_REQUIRES_REVIEW", "received_at": "2026-10-19T01:05:02Z" },
+      { "event_id": "7d4c1a0e-3b2f-4c55-8a71-2e9b6f0d1c88", "result": "accepted", "record_id": 9013, "received_at": "2026-10-19T01:05:02Z" },
+      { "event_id": "e1f2a3b4-5c6d-4e7f-8a9b-0c1d2e3f4a5b", "result": "rejected", "error": { "code": "EVENT_OUT_OF_RANGE" } }
+    ]
+  }
 }
 ```
 
 A batch response should report results per event. One invalid event should not silently hide the status of the other events in the batch.
+
+v1.2: `result` per event = `accepted` / `pending_review` / `rejected` (record tersimpan) atau `duplicate` (event sudah ada; `record_id` dan status lama dikembalikan). Event yang ditolak validasi tanpa record (`EVENT_OUT_OF_RANGE`, `IDEMPOTENCY_KEY_REUSED`) hanya membawa `error.code`. Klien menghapus event dari outbox untuk semua hasil selain error retryable.
 
 ### 7.4 Example: Salary Statement Response
 
@@ -1424,13 +2223,20 @@ A batch response should report results per event. One invalid event should not s
     "period": "2026-09",
     "status": "published",
     "currency": "IDR",
-    "components": [
-      { "type": "base_salary", "label": "Gaji pokok", "amount": "5000000.00" },
-      { "type": "allowance", "label": "Tunjangan", "amount": "500000.00" },
-      { "type": "overtime", "label": "Lembur", "amount": "250000.00" },
-      { "type": "deduction", "label": "Potongan", "amount": "100000.00" }
+    "version": 1,
+    "pay_date": "2026-09-25",
+    "earnings": [
+      { "code": "base_salary", "label": "Gaji Pokok", "amount": "5000000.00" },
+      { "code": "transport", "label": "Tunjangan Transport", "explanation": "20 hari × Rp 20.000", "amount": "400000.00" },
+      { "code": "overtime", "label": "Lembur", "explanation": "6 jam × Rp 40.000", "quantity": "6.00", "rate": "40000.00", "amount": "240000.00" }
     ],
-    "net_salary": "5650000.00"
+    "deductions": [
+      { "code": "bpjs_kesehatan", "label": "BPJS Kesehatan", "explanation": "1% gaji pokok", "amount": "50000.00" },
+      { "code": "late_penalty", "label": "Keterlambatan", "explanation": "2 × Rp 25.000", "amount": "50000.00" }
+    ],
+    "total_earnings": "5640000.00",
+    "total_deductions": "100000.00",
+    "net_salary": "5540000.00"
   }
 }
 ```
@@ -1563,6 +2369,23 @@ Setelah sukses: `must_change_password` menjadi `false`, `security_events.passwor
 | `INVALID_CREDENTIALS` | no | Login gagal generik |
 | `ACCOUNT_SUSPENDED` | no | User suspended |
 | `PASSWORD_CHANGE_REQUIRED` | no | Guard terhadap endpoint selain change-password |
+| `DUPLICATE_EVENT` | no | *v1.2* — `event_id` sudah tercatat dengan payload sama; response membawa record lama (HTTP 200, bukan error fatal) |
+| `IDEMPOTENCY_KEY_REUSED` | no | *v1.2* — `event_id`/`Idempotency-Key` sama dengan payload berbeda (409) |
+| `EVENT_OUT_OF_RANGE` | no | *v1.2* — `occurred_at` di masa depan melebihi toleransi skew atau lebih tua dari batas offline (§8.3) |
+| `BATCH_TOO_LARGE` | no | *v1.2* — lebih dari 100 event per batch |
+| `ALREADY_CHECKED_IN` / `NOT_CHECKED_IN` | no | *v1.2* — urutan event tidak valid untuk `work_date` |
+| `OUTSIDE_GEOFENCE` | no | *v1.2* — reason code; status bergantung kebijakan (rejected atau pending_review) |
+| `DEVICE_NOT_TRUSTED` | no | *v1.2* — perangkat bukan perangkat aktif user saat binding wajib |
+| `ON_LEAVE` | no | *v1.2* — presensi pada hari cuti approved |
+| `STATE_NOT_TRANSITIONABLE` | no | *v1.2* — transisi tidak diizinkan dari status saat ini (keputusan ganda, edit statement published) |
+| `NOT_CURRENT_APPROVER` | no | *v1.2* — aktor bukan approver step aktif |
+| `EVIDENCE_REQUIRED` | no | *v1.2* — tugas mewajibkan bukti foto |
+| `QUOTA_EXCEEDED` | no | *v1.2* — sisa cuti tahunan / batas izin bulanan terlampaui |
+| `ATTACHMENT_REQUIRED` | no | *v1.2* — sakit > 1 hari tanpa surat dokter, dinas luar tanpa surat tugas |
+| `INVALID_PERIOD` | no | *v1.2* — format periode/rentang tanggal tidak valid atau periode sudah ada |
+| `PERIOD_NOT_READY` | no | *v1.2* — approve/publish saat masih ada statement belum `reviewed` |
+| `FILE_TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE` | no | *v1.2* — lampiran > 10 MB atau MIME di luar whitelist |
+| `RATE_LIMITED` | yes | *v1.2* — throttle; klien retry dengan backoff |
 
 Error tetap memakai envelope `success`/`message`/`errors` dari `docs/openapi/auth.yaml`; code diletakkan di `errors.code` (atau field export `code`) agar klien Flutter menampilkan pesan lokal.
 
@@ -1572,6 +2395,85 @@ Error tetap memakai envelope `success`/`message`/`errors` dari `docs/openapi/aut
 - `RegisterRequest` (`/register`) ditandai **deprecated**.
 - Schema tambahan: `CreateEmployeeRequest`, `CreateEmployeeResponse` (termasuk `initial_password` + status undangan/delivery), `InvitationResource`, `ChangePasswordRequest`, `ForgotPasswordRequest`, `ResetPasswordRequest`.
 - Versi kontrak dinaikkan (mis. `0.2.0`) dan `docs/openapi/README.md` diperbarui saat endpoint pertama dari desain ini diimplementasikan.
+
+### 7.9 Contoh: Check-in Online v1.2 — *baru di v1.2*
+
+`POST /api/v1/attendance/events` dengan header `Idempotency-Key` = `event_id`:
+
+```json
+{
+  "event_id": "55b3f4fc-267a-4ef8-9c38-8c351cfe7f70",
+  "event_type": "check_in",
+  "occurred_at": "2026-10-07T07:58:11+07:00",
+  "device_uid": "c7a1f0e2-installation-id",
+  "location": { "latitude": -7.782901, "longitude": 110.367083, "accuracy_m": 12.5 },
+  "integrity": { "mock_location": false, "developer_mode": false, "rooted": false, "fake_gps_app": false },
+  "face": { "capture_reference": "upload-token-from-face-service" }
+}
+```
+
+Response `201` (atau `200` + `DUPLICATE_EVENT` pada replay):
+
+```json
+{
+  "success": true,
+  "data": {
+    "record_id": 9001,
+    "event_id": "55b3f4fc-267a-4ef8-9c38-8c351cfe7f70",
+    "status": "accepted",
+    "work_date": "2026-10-07",
+    "received_at": "2026-10-07T00:58:12Z",
+    "location_status": "inside",
+    "distance_m": 34,
+    "verification": { "decision": "match", "match_score": "0.9740", "liveness_status": "passed" },
+    "late_minutes": 0
+  }
+}
+```
+
+- Klien **tidak** mengirim `status`, `distance_m`, `risk_score`, `work_location_id`, atau `shift_id`; semuanya ditetapkan server dari assignment aktif.
+- Contoh gagal: `"status": "rejected", "reason_code": "MOCK_LOCATION"` atau `"status": "pending_review", "reason_code": "GPS_ACCURACY_LOW"` (akurasi 68 m).
+
+### 7.10 Contoh: Review Submission Tugas — *baru di v1.2*
+
+`POST /api/v1/hr/task-submissions/{id}/review`:
+
+```json
+{ "decision": "approved", "rating": 5, "note": "Rapi, sesuai checklist." }
+```
+
+```json
+{ "decision": "revision_requested", "note": "Foto rak B belum ada." }
+```
+
+Response memuat `task_assignment.status` terbaru (`completed` atau `revision_required`) dan `tasks.status` bila semua assignment selesai (`closed`). Review kedua atas submission yang sama → `409 STATE_NOT_TRANSITIONABLE`.
+
+### 7.11 Contoh: Publikasi Periode Gaji — *baru di v1.2*
+
+`POST /api/v1/hr/payroll-periods/{id}/publish` dengan `Idempotency-Key`:
+
+```json
+{ "confirm": true }
+```
+
+Response `200`:
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": "2026-10",
+    "status": "published",
+    "published_at": "2026-10-24T03:00:00Z",
+    "statement_count": 214,
+    "notifications_queued": 214
+  }
+}
+```
+
+- Replay dengan key sama → hasil yang sama, tidak ada publikasi/notifikasi ganda.
+- Periode belum `approved` → `409 PERIOD_NOT_READY`; periode sudah `published` dengan key berbeda → `409 STATE_NOT_TRANSITIONABLE`.
+- Karyawan baru melihat slip setelah langkah ini; sebelum itu `GET /salary-statements` tidak mengembalikan periode tersebut.
 
 ---
 
@@ -1605,6 +2507,18 @@ SYNC_FAILED
 
 The local status `SYNCED` means the server has returned a result for the event. The server decision may still be `PENDING_REVIEW`; therefore the application should not conflate successful transport with accepted attendance.
 
+*v1.2 — pemetaan state lokal ↔ server:*
+
+| State lokal (klien) | Kondisi | State/record server |
+|---|---|---|
+| `CAPTURED_LOCAL`, `PENDING_SYNC`, `SYNCING` | Belum ada response | Belum ada record |
+| `SYNC_FAILED` | Timeout/5xx/`RATE_LIMITED` | Belum ada record **atau** sudah ada (klien tidak tahu) → retry dengan `event_id`/`client_batch_id` sama; server menjawab `duplicate` |
+| `SYNCED` + accepted | `result = accepted` / `duplicate` accepted | `attendance_records.status = accepted` |
+| `PENDING_REVIEW` | `result = pending_review` | `status = pending_review`; UI "Menunggu" sampai notifikasi keputusan |
+| `REJECTED` | `result = rejected` atau error non-retryable (`EVENT_OUT_OF_RANGE`, `IDEMPOTENCY_KEY_REUSED`) | Record `rejected` + `reason_code`, atau tanpa record |
+
+Event offline membawa `captured_policy_version` dari `/bootstrap`; server menyimpan kebijakan yang **diterapkan** di `attendance_records.offline_policy`.
+
 ### 8.2 Idempotency Rules
 
 - The mobile client generates one immutable `event_id` per attendance action.
@@ -1614,6 +2528,11 @@ The local status `SYNCED` means the server has returned a result for the event. 
 - The API validates employee ownership and rejects replay attempts that reuse an ID with materially different payload data.
 - State transitions and persistence should be transactional.
 - *Ditambah v1.1:* `POST /api/v1/hr/employees` dan pengiriman undangan juga idempotent — header `Idempotency-Key` (UUID/ULID) atau kunci `(invitation_id, channel, attempt)`; retry HR tidak membuat dua employee atau mengirim undangan ganda.
+- *Ditambah v1.2:*
+  - `payload_hash` = SHA-256 dari payload kanonik (key terurut, tanpa field transport). `event_id` sama + hash sama → `duplicate`; hash beda → `IDEMPOTENCY_KEY_REUSED`.
+  - Batch idempotent per `(employee_id, client_batch_id)`; event di dalamnya tetap idempotent per `event_id` walau dikirim ulang di batch lain.
+  - Keputusan (review presensi, koreksi, approval step, review tugas, publish) idempotent lewat guard status di dalam transaksi + `SELECT ... FOR UPDATE` pada baris yang diputuskan; keputusan kedua → `STATE_NOT_TRANSITIONABLE`.
+  - `Idempotency-Key` umum (create task, create request, publish) disimpan di cache/Redis 24 jam dengan hasil response; publish payroll juga di `salary_publication_events.idempotency_key` (permanen).
 
 ### 8.3 Retry, Timeout and Batch Limits
 
@@ -1623,7 +2542,10 @@ Initial values below are tuning candidates, not final production commitments:
 |---|---|---|
 | Connect timeout | 10 seconds | HTTP client/API gateway configuration. |
 | API response timeout | 20–30 seconds for ordinary requests | Keep long AI/file work out of synchronous requests when possible. |
-| Batch size | Start with a modest limit (e.g. 50 events/request) | Validate maximum payload and per-event cost. |
+| Batch size | Start with a modest limit (e.g. 50 events/request) | Validate maximum payload and per-event cost. *v1.2:* hard limit 100 → `BATCH_TOO_LARGE`. |
+| Umur event offline (*v1.2*) | Maks. 72 jam sebelum `received_at` | Lebih tua → `EVENT_OUT_OF_RANGE`; jalur koreksi tetap tersedia. |
+| Clock skew (*v1.2*) | `occurred_at` maks. 5 menit di depan waktu server | Lebih → `EVENT_OUT_OF_RANGE`; skew kecil dicatat `integrity_flags: clock_skew`. |
+| Upload lampiran (*v1.2*) | Maks. 10 MB per file, 5 file per submission/request | `FILE_TOO_LARGE`; MIME whitelist. |
 | Retry | Exponential backoff with jitter for transient failures | Do not retry validation/authentication errors blindly. |
 | Idempotency | Required for mutating/sync operations that may be retried | Unique key and transactional server-side logic. |
 | AI latency | Set a budget after model benchmarking | Timeouts, bounded input, and explicit unavailable/failure states. |
@@ -1638,6 +2560,16 @@ The product owner must decide which of these policies applies:
 3. **Restricted offline mode:** offline check-in is allowed only for specific roles, sites, or time windows.
 
 Whichever policy is chosen, the UI must communicate that a locally stored event is not yet verified by the server.
+
+*v1.2 — skema policy-agnostic (ADR 0009):* ketiga kebijakan di atas dapat diterapkan tanpa perubahan skema:
+
+| Kebijakan | Nilai `offline_policy` | Hasil server untuk event offline yang lolos validasi |
+|---|---|---|
+| 1. Provisional acceptance | `accept_with_flags` | `accepted` bila wajah/geofence lolos; `pending_review` bila ada `integrity_flags`/risk ≥ ambang |
+| 2. Review required | `review_required` | Selalu `pending_review` |
+| 3. Restricted offline | `restricted` | `rejected` + `OFFLINE_NOT_ALLOWED` bila role/lokasi/jam tidak diizinkan, selain itu seperti kebijakan 1 |
+
+Rekomendasi default MVP: **kebijakan 1** (sesuai UI "Presensi tersimpan offline, akan disinkronkan"), dengan event berisiko tinggi masuk antrean review. Keputusan final tetap open question §15.4.
 
 ---
 
@@ -1742,6 +2674,33 @@ Migration tetap terpusat di `database/migrations/` (ADR 0001). Urutan (setiap la
 - Hindari `citext`, `ENUM`, dan fitur PostgreSQL-only. Lowercase email ditegaskan di aplikasi, bukan di DB.
 - Partial unique index: didukung SQLite; tulis raw SQL di migration bila builder kurang nyaman.
 - `jsonb` → kolom `json`/`text` pada SQLite; `time`, `date`, dan timestamp `timestamptz` didukung Laravel schema builder.
+
+### 9.6 Rencana Migrasi Skema v1.2 — *baru di v1.2*
+
+Dijalankan setelah migration v1.1 (§9.5). Belum ada data presensi/tugas/pengajuan/gaji di produksi, sehingga **tidak ada backfill**; setiap migration punya `down()` yang men-drop tabel/index yang dibuatnya, urutan `down()` kebalikan dari urutan di bawah.
+
+1. `create_devices_table` (+ raw SQL `one_active_device`)
+2. `create_sync_batches_table`
+3. `create_attendance_correction_requests_table` (tanpa FK ke `attendance_records` dulu)
+4. `create_attendance_records_table` (FK ke devices, sync_batches, shifts, work_locations, correction requests; self-FK `supersedes_record_id`; check `correction_has_target`)
+5. `add_record_fks_to_attendance_correction_requests` — FK `attendance_record_id`, `result_record_id` (memecah siklus FK)
+6. `create_attendance_verifications_table`
+7. `create_tasks_table`
+8. `create_task_assignments_table`
+9. `create_task_submissions_table` (+ `one_pending_submission`)
+10. `create_task_attachments_table`
+11. `create_task_comments_table`
+12. `create_administrative_requests_table`
+13. `create_request_approvals_table`
+14. `create_request_attachments_table`
+15. `create_payroll_periods_table`
+16. `create_salary_statements_table` (+ `one_live_statement`, check `net_matches`)
+17. `create_salary_components_table`
+18. `create_salary_publication_events_table`
+19. `create_notifications_table` — bila tabel `notifications` bawaan Laravel sudah ter-publish, migration ini menggantinya (drop + create; aman karena belum dipakai)
+20. Seed: setting organisasi (kuota cuti 12, izin 2/bulan, toleransi telat, potongan Rp 25.000, lembur Rp 40.000/jam, tanggal gajian 25, toggle binding perangkat/bukti foto/lembur perlu atasan) — lokasi penyimpanan setting adalah open question §15.4.
+
+Catatan SQLite: `uuid` → `char(36)`; check constraint ditulis lewat raw SQL `CREATE TABLE` atau dilewati di SQLite dan ditegakkan di aplikasi + test PostgreSQL di CI. CI wajib menjalankan suite migrasi minimal sekali di PostgreSQL agar partial index dan check yang PostgreSQL-only tervalidasi.
 
 ---
 
@@ -1942,6 +2901,31 @@ Before production, review applicable Indonesian personal-data protection require
 
 **Kepatuhan data:** wajah dapat dianggap data pribadi yang bersifat spesifik menurut UU No. 27/2022 — sehingga wajib ada alur consent saat onboarding, retensi/penghapusan template saat termination/revocation sesuai kebijakan retensi (open question §15.2), dan pencatatan audit yang dapat dipertanggungjawabkan (`audit_logs`: aktor, IP, user agent, before/after, reason).
 
+### 12.7 Lokasi, Lampiran, Gaji, dan Logging Domain v1.2 — *baru di v1.2*
+
+**Lokasi:**
+
+- Koordinat hanya diambil **saat check-in/out** (bukan tracking kontinu) dan disimpan di `attendance_records.latitude/longitude` dengan presisi 6 desimal.
+- Endpoint HR default mengembalikan `location_status` + `distance_m`; koordinat presisi hanya untuk permission `attendance.location.view` dan setiap akses dicatat `audit_logs` (`attendance.location.viewed`).
+- `audit_logs` snapshot presensi/koreksi **tidak** memuat koordinat — cukup `location_status`, `distance_m`, `reason_code`.
+- Retensi koordinat: usulan 12 bulan, lalu di-null-kan oleh job (record tetap ada) — open question §15.4.
+
+**Lampiran (tugas, pengajuan):**
+
+- Disimpan di disk private (S3-compatible/MinIO atau local private disk); tidak ada URL publik. Unduh via signed URL ≤ 5 menit setelah policy object-level lolos.
+- MIME whitelist + cek magic bytes, maks. 10 MB, nama file asli disimpan terpisah dari `object_key` acak; EXIF GPS di foto bukti di-strip saat upload.
+- Surat dokter = data kesehatan → hanya pemilik, approver step terkait, dan HR yang dapat membaca.
+
+**Gaji:**
+
+- Employee hanya membaca statement `published` miliknya; HR non-payroll tidak membaca nominal.
+- Statement `published` immutable (guard aplikasi + test); koreksi = versi baru.
+- Notifikasi dan push tidak memuat nominal ("Slip gaji Oktober sudah terbit").
+
+**Aksi audit minimal v1.2** (tambahan untuk `audit_logs.action`, struktur tabel tidak berubah): `attendance.reviewed`, `attendance.corrected`, `attendance_correction.submitted`, `attendance_correction.decided`, `attendance.location.viewed`, `task.created`, `task.cancelled`, `task_submission.reviewed`, `request.submitted`, `request.step_decided`, `request.cancelled`, `payroll_period.generated`, `payroll_period.approved`, `salary.reviewed`, `salary.adjusted`, `salary.published`, `salary.superseded`, `device.bound`, `device.revoked`. Event `security_events` tambahan: `device.rejected`, `face.verification.failed`, `attendance.integrity_flagged`.
+
+**Logging:** log aplikasi tidak pernah memuat gambar wajah, embedding, token, password, koordinat presisi, isi lampiran, atau nominal gaji; `event_id`/`record_id` dipakai sebagai korelasi.
+
 ---
 
 ## 13. Evaluation & Verification Framework
@@ -1955,12 +2939,21 @@ The release should be gated by automated tests and operational checks. Quantitat
 3. **Administrative requests:** valid/invalid date ranges, leave/permission/overtime rules, approval, rejection, and repeated decision.
 4. **Salary transparency:** period listing, decimal arithmetic, publication state, unauthorized cross-employee access, and statement revisions.
 5. **RBAC / organization scope:** employee, HR reviewers, approvers, payroll managers, and administrative permissions.
+6. **Object-level authorization (*v1.2*, wajib):** employee A mendapat `404`/`403` saat membaca/menulis attendance record, koreksi, task assignment/submission/lampiran, administrative request/lampiran, salary statement/PDF, dan notifikasi milik employee B; atasan hanya melihat pengajuan bawahan langsung; HR non-payroll tidak melihat nominal gaji.
+7. **Presensi (*v1.2*):** replay `event_id` sama → satu record + `duplicate`; `event_id` sama payload beda → `IDEMPOTENCY_KEY_REUSED`; luar geofence/mock location/root/akurasi rendah/impossible travel → status + `reason_code` sesuai policy; check-in pada hari cuti → `ON_LEAVE`; shift malam → `work_date` benar.
+8. **Koreksi (*v1.2*):** approve membuat record `source=correction` dan record asli tidak berubah; decision ganda ditolak; laporan/payroll membaca record efektif.
+9. **Tugas (*v1.2*):** multi-assignee independen; `requires_photo_proof` menolak submit tanpa evidence; rating 1–5 wajib saat approve; task `closed` saat semua assignment selesai.
+10. **Pengajuan (*v1.2*):** dua langkah berurutan; izin ke-3 dalam sebulan → `QUOTA_EXCEEDED`; sakit 2 hari tanpa surat → `ATTACHMENT_REQUIRED`; setengah hari multi-tanggal ditolak; bulk approve menghasilkan step per request.
+11. **Payroll (*v1.2*):** `net = earnings − deductions` (check DB + test); publish periode idempotent dan menerbitkan tepat satu notifikasi per employee; statement published tidak bisa diubah; supersede membuat versi baru dan partial unique menjaga satu slip hidup.
+12. **Perangkat (*v1.2*):** login perangkat kedua ditolak saat binding aktif; reset HR mencabut token lama.
 
 ### 13.2 Offline and Integration Tests
 
 - Loss of network during capture, upload, and response.
 - App termination/restart while records are pending.
 - Duplicate batch submission and partial batch failures.
+- *v1.2:* retry batch dengan `client_batch_id` sama setelah timeout → hasil identik tanpa record ganda; batch > 100 event ditolak; event > 72 jam ditolak.
+- *v1.2:* migrasi `up`/`down` lengkap di SQLite in-memory **dan** PostgreSQL (CI).
 - Timezone and device-clock manipulation.
 - Invalid/expired token on reconnect.
 - Model-version or policy-version mismatch.
@@ -2089,6 +3082,36 @@ Item lama di daftar §15 yang **belum** ditutup v1.1 tetap terbuka: HR client pl
 | 9 | HR reset password karyawan? | Ya, endpoint `POST /hr/employees/{id}/reset-password` telah diadakan: password sementara baru + tampil sekali + `must_change_password`; setiap reset tercatat di audit. |
 | 10 | Verifikasi dua langkah (OTP) untuk HR? | Belum diputuskan; slot dijadwalkan setelah M9 security review. |
 
+### 15.3 Keputusan yang Difinalkan di v1.2 + ADR — *baru di v1.2*
+
+| Keputusan | ADR |
+|---|---|
+| Status server presensi hanya `accepted`/`pending_review`/`rejected` + `decision_source`; skema menyimpan snapshot `offline_policy` sehingga ketiga kebijakan §8.4 didukung tanpa migrasi; `event_id` + `payload_hash` + `sync_batches` untuk idempotency | `docs/adr/0009-attendance-status-and-policy-agnostic-offline-schema.md` |
+| Koreksi presensi lewat `attendance_correction_requests`; approval membuat record pengganti (`supersedes_record_id`), record asli tidak pernah diubah; record efektif = accepted yang tidak di-supersede | `docs/adr/0010-attendance-corrections-via-superseding-records.md` |
+| Workflow tugas per assignee (`task_assignments.status`), `tasks.status` hanya lifecycle header; review per submission dengan rating 1–5 | `docs/adr/0011-per-assignment-task-workflow.md` |
+| `payroll_periods` sebagai unit kerja HR; slip `salary_statements` beku setelah publish dengan total tersimpan + check `net = earnings − deductions`; koreksi = versi baru; publikasi massal idempotent + `salary_publication_events` | `docs/adr/0012-payroll-periods-and-frozen-statements.md` |
+| Binding satu akun satu perangkat aktif (`devices`, partial unique); reset = revoke | `docs/adr/0013-device-binding.md` |
+| Lampiran per domain di private storage (metadata saja di DB, signed URL); notifikasi in-app di tabel `notifications` ber-PK `bigint` | `docs/adr/0014-private-attachments-and-notifications.md` |
+| Approval pengajuan dua langkah disimpan per step di `request_approvals` | §5.15 (tanpa ADR terpisah — mengikuti UI) |
+| Status harian presensi diturunkan, tidak disimpan | §6.4.1 `attendance_records` |
+
+### 15.4 Open Questions Baru (v1.2) — *baru di v1.2*
+
+| # | Pertanyaan | Rekomendasi |
+|---|---|---|
+| 1 | Kebijakan offline mana yang dipakai (§8.4)? | Kebijakan 1 (provisional + flag → review); skema sudah siap untuk 2/3. |
+| 2 | Toleransi terlambat berapa menit? UI menunjukkan potongan bila > 5 menit. | Setting organisasi `late_grace_minutes = 5`; simpan di tabel setting. |
+| 3 | Di mana setting organisasi disimpan (kuota cuti, binding perangkat, bukti foto, lembur perlu atasan, tarif lembur, potongan telat, tanggal gajian)? | Tabel `organization_settings` key/value ber-versi (`policy_versions` di `/bootstrap`); bukan `.env`. |
+| 4 | Apakah koreksi presensi wajib disetujui atasan dulu seperti pengajuan cuti? | MVP: atasan hanya dinotifikasi, HR memutuskan; bila perlu dua langkah, pakai pola `request_approvals`. |
+| 5 | Perlu tabel `leave_balances` (carry-over, accrual, cuti bersama)? | Tidak untuk MVP; tambah bila ada aturan carry-over. |
+| 6 | Estimasi gaji bulan berjalan (slip Oktober "belum final") ditampilkan dari mana? | Endpoint read-only `GET /salary-statements/estimate` yang menghitung on-the-fly, tidak disimpan, tidak pernah dianggap slip. |
+| 7 | Form "Tanya soal gaji" disimpan di backend? | MVP: buat notifikasi + email ke payroll; tabel `salary_questions` bila HR butuh tracking status. |
+| 8 | Preferensi notifikasi disimpan di mana? | Kolom `notification_preferences jsonb` di tabel setting user; kategori `keamanan` tidak bisa dimatikan. |
+| 9 | Perhitungan PPh 21 & BPJS dilakukan sistem atau diimpor? | Bila belum ada aturan resmi yang divalidasi finance, komponen ini diisi `manual`/import; jangan hardcode tarif. |
+| 10 | Retensi koordinat presensi & lampiran? | Koordinat di-null-kan setelah 12 bulan; lampiran mengikuti retensi dokumen HR (konfirmasi legal). |
+| 11 | Ambang `risk_score` dan bobot sinyal (fake GPS, impossible travel, dsb.)? | Mulai rule-based (`≥ 0,8` → review); kalibrasi setelah pilot. |
+| 12 | Boleh multi-perangkat untuk role tertentu (HR, supervisor)? | Toggle per organisasi sudah ada; per-role ditunda. |
+
 ---
 
 ## 16. Architecture Baseline Summary
@@ -2160,3 +3183,51 @@ Yang **tidak** berubah: topologi deployment (§11), offline sync pattern (§8.1/
 
 - Perbarui `docs/openapi/auth.yaml` (v0.2.0) mengikuti §7.8 saat implementasi M2 dimulai.
 - Roadmap: tulis ulang seksi Phase 2 (M2) memakai endpoint HR v1.1 dan tambahkan task unit/feature test sesuai guard §5–§6; endpoint lama `POST /register` dijadwalkan deprecated bertahap setelah repo mobile bermigrasi.
+
+---
+
+## 18. Ringkasan Perubahan v1.2.0 & Acceptance Checklist — *baru di v1.2*
+
+Dasar desain: perilaku prototipe Flutter `HadirMetrik` (presensi + simulasi kegagalan, insiden HR, tugas multi-assignee, pengajuan dua langkah, penggajian per periode, notifikasi, binding perangkat).
+
+### 18.1 Ringkasan perubahan
+
+| Section | Perubahan |
+|---|---|
+| Header | Versi → 1.2.0; catatan revisi 1.2.0 |
+| §4 | Flow baru 4.12 koreksi presensi, 4.13 penutupan & publikasi periode gaji |
+| §5 | State server presensi (5.11), koreksi (5.12), sync batch (5.13), tugas per assignee (5.14), langkah approval pengajuan (5.15), periode gaji & perangkat (5.16); baris guard baru di §5.5 |
+| §6.1.2 | ERD presensi/tugas/pengajuan/gaji dirancang ulang (19 entitas, tipe disederhanakan agar render di GitHub) |
+| §6.2 | Kandidat → inti (devices, sync_batches, correction, attachments, comments, approvals, payroll_periods, notifications, publication events); ditolak/ditunda dengan alasan (leave_balances, notification_preferences, salary_questions, daily summaries) |
+| §6.4.1 | Spesifikasi penuh 18 tabel v1.2 + SQL ringkas partial unique / check |
+| §7 | Katalog endpoint v1.2, contoh sync per event & slip diperbarui (§7.3–7.4), 17 error code baru (§7.7), contoh baru §7.9–7.11, peran `/me` & `/bootstrap` |
+| §8 | Pemetaan state lokal ↔ server, aturan idempotency v1.2, batas umur event/skew/lampiran, skema policy-agnostic §8.4 |
+| §9.6 | Rencana migrasi 20 langkah (tanpa backfill), urutan pemecah siklus FK, catatan SQLite/PostgreSQL CI |
+| §12.7 | Privasi lokasi, lampiran, gaji, aksi audit & logging v1.2 |
+| §13 | Test object-level authorization lintas employee + test domain v1.2 |
+| §15.3–15.4 | Keputusan v1.2 + ADR 0009–0014; 12 open questions |
+| ADR | File baru `docs/adr/0009…0014` |
+
+Yang **tidak** berubah: §6.1.1, spesifikasi tabel v1.1 di §6.4 (users, employees, divisions, shifts, work_locations, assignment, compensations, invitations, deliveries, face_templates, audit_logs), topologi deployment (§11), fase implementasi (§14).
+
+### 18.2 Acceptance Checklist
+
+- [x] Semua tabel v1.2 punya spesifikasi penuh: kolom, tipe, null, default, unique, FK + `ON DELETE`, index, check, alasan (§6.4.1).
+- [x] `event_id` tetap idempotency key unik; replay mengembalikan hasil pertama; payload berbeda → `IDEMPOTENCY_KEY_REUSED`; batch idempotent per `client_batch_id`.
+- [x] State machine server presensi/koreksi/sync/tugas/pengajuan/gaji/perangkat + guard eksplisit (§5.11–5.16, §5.5).
+- [x] Skema offline mendukung kebijakan provisional, wajib-review, dan restricted tanpa redesain (`offline_policy`, ADR 0009).
+- [x] Koreksi presensi tidak pernah mengedit record asli; record pengganti + audit (ADR 0010).
+- [x] Geofence memakai `work_locations.geofence_radius_m`; presensi hanya menyimpan koordinat, akurasi, jarak, dan status validasi.
+- [x] Lampiran privat di object storage, metadata di DB, signed URL — tanpa URL publik (ADR 0014).
+- [x] Gaji: total ditulis server + check `net = earnings − deductions`; object-level access; publish idempotent dan beraudit (`audit_logs` + `salary_publication_events`).
+- [x] Tidak ada raw biometrik di DB; koordinat presisi dibatasi permission, tidak masuk audit snapshot/log.
+- [x] Tidak ada password/token/isi lampiran/nominal gaji di log atau notifikasi.
+- [x] ERD Mermaid valid untuk GitHub (tanpa `|` dan tipe berkurung); §6.1.1 dan spesifikasi v1.1 tidak diubah.
+- [x] Semua PK `bigint`; UUID hanya `event_id`, `client_batch_id`, idempotency key; status string + check; tanpa ENUM.
+- [x] Setiap migration v1.2 punya `down()`; kompatibel SQLite in-memory (partial unique, `jsonb`→text, `uuid`→`char(36)`).
+- [x] ADR 0009–0014, open questions §15.4, dan changelog 1.2.0 terdokumentasi.
+
+### 18.3 Follow-up kontrak
+
+- Tambah `docs/openapi/attendance.yaml`, `tasks.yaml`, `requests.yaml`, `payroll.yaml` saat M3–M7 dimulai, mengikuti §7.1 v1.2 dan error code §7.7.
+- Frontend Flutter: ganti data seed (`lib/data.dart`) dengan repository yang membaca endpoint v1.2; outbox lokal memakai `event_id` + `client_batch_id`.
