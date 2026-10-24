@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Api\V1\Auth;
 
+use App\Modules\Employees\Infrastructure\Models\Employee;
 use App\Modules\Identity\Infrastructure\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -75,7 +76,7 @@ class LoginTest extends TestCase
             'must_change_password' => true,
         ]);
 
-        \App\Modules\Employees\Infrastructure\Models\Employee::create([
+        Employee::create([
             'user_id' => $user->id,
             'employee_number' => 'HM-0001',
             'full_name' => 'Karyawan Contoh',

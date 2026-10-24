@@ -15,8 +15,11 @@ class CreateEmployeeTest extends TestCase
     use RefreshDatabase;
 
     private User $hrUser;
+
     private Division $division;
+
     private Shift $shift;
+
     private WorkLocation $location;
 
     protected function setUp(): void

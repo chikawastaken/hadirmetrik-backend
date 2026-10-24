@@ -4,7 +4,6 @@ namespace App\Modules\Employees\Infrastructure\Services;
 
 use App\Modules\Employees\Contracts\EmployeeNumberGenerator;
 use App\Modules\Employees\Infrastructure\Models\Employee;
-use Illuminate\Support\Facades\DB;
 
 final class DatabaseEmployeeNumberGenerator implements EmployeeNumberGenerator
 {

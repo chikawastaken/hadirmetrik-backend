@@ -4,12 +4,12 @@ namespace App\Modules\Identity\Application\Login;
 
 use App\Modules\Audit\Contracts\SecurityEventRecorder;
 use App\Modules\Employees\Contracts\EmployeeDirectory;
+use App\Modules\Identity\Application\Exceptions\AccountSuspended;
 use App\Modules\Identity\Application\Exceptions\InvalidCredentials;
 use App\Modules\Identity\Contracts\AccountRepository;
 use App\Modules\Identity\Contracts\Data\AuthResult;
 use App\Modules\Identity\Contracts\PasswordHasher;
 use App\Modules\Identity\Contracts\TokenIssuer;
-use App\Shared\Exceptions\ApiException;
 
 final class LoginUseCase
 {
@@ -45,7 +45,7 @@ final class LoginUseCase
         }
 
         if ($credentials->account->status === 'suspended') {
-            throw new \App\Modules\Identity\Application\Exceptions\AccountSuspended;
+            throw new AccountSuspended;
         }
 
         $token = $this->tokens->issue($credentials->account, $input->deviceName ?? 'unknown');

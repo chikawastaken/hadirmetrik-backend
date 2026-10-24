@@ -2,6 +2,7 @@
 
 namespace App\Modules\Identity\Application\RegisterEmployee;
 
+use App\Mail\RegistrationMail;
 use App\Modules\Audit\Contracts\SecurityEventRecorder;
 use App\Modules\Employees\Contracts\Data\EmployeeSummary;
 use App\Modules\Employees\Contracts\EmployeeDirectory;
@@ -13,6 +14,7 @@ use App\Modules\Identity\Contracts\Data\AuthResult;
 use App\Modules\Identity\Contracts\PasswordHasher;
 use App\Modules\Identity\Contracts\TokenIssuer;
 use App\Shared\Contracts\TransactionManager;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * Registers an employee against a pre-existing HR record and a one-time
@@ -59,7 +61,13 @@ final class RegisterEmployeeUseCase
                 self::DEFAULT_ROLE,
             );
 
-            return new AuthResult($account, $this->tokens->issue($account, 'mobile'));
+            $issuedToken = $this->tokens->issue($account, 'mobile');
+
+            // Send custom registration email with verification token
+            Mail::to($account->email)
+                ->send(new RegistrationMail($account, $issuedToken->token));
+
+            return new AuthResult($account, $issuedToken);
         });
 
         $this->events->record('register.succeeded', [
