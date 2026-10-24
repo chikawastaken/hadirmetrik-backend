@@ -1,7 +1,7 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -21,7 +21,7 @@ Route::get('/health', function () {
     try {
         DB::connection()->getPdo();
         $status['database'] = 'connected';
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         $status['status'] = 'degraded';
         $status['database'] = 'error';
         $status['database_error'] = env('APP_DEBUG', false) ? $e->getMessage() : null;

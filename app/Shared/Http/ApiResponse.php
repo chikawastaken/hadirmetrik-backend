@@ -1,54 +1,54 @@
 <?php
 
-namespace App\Http\Resources;
+namespace App\Shared\Http;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
+/**
+ * Consistent JSON envelope for every API response.
+ *
+ * Success: { "success": true, "data": <...>, "message": <optional> }
+ * Error:   { "success": false, "message": <...>, "errors": <optional> }
+ */
 class ApiResponse extends JsonResource
 {
-    private int $statusCode;
-
-    private ?string $message;
-
-    public function __construct($resource, int $statusCode = 200, ?string $message = null)
-    {
+    public function __construct(
+        mixed $resource,
+        private readonly int $statusCode = 200,
+        private readonly ?string $message = null,
+    ) {
         parent::__construct($resource);
-        $this->statusCode = $statusCode;
-        $this->message = $message;
     }
 
     public function toArray(Request $request): array
     {
-        $data = [
+        $payload = [
             'success' => true,
             'data' => $this->resource,
         ];
 
         if ($this->message !== null) {
-            $data['message'] = $this->message;
+            $payload['message'] = $this->message;
         }
 
-        return $data;
+        return $payload;
     }
 
-    public function render(Request $request)
+    /**
+     * Bypass resource wrapping so the envelope stays flat.
+     */
+    public function toResponse($request): JsonResponse
     {
         return response()->json($this->toArray($request), $this->statusCode);
     }
 
-    /**
-     * Return a success response.
-     */
     public static function success(mixed $data, ?string $message = null, int $status = 200): self
     {
         return new self($data, $status, $message);
     }
 
-    /**
-     * Return an error response with consistent format.
-     */
     public static function error(string $message, int $status = 422, mixed $errors = null): JsonResponse
     {
         $payload = [
