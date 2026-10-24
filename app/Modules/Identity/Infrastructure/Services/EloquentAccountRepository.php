@@ -30,13 +30,21 @@ final class EloquentAccountRepository implements AccountRepository
         return User::query()->where('email', $email)->exists();
     }
 
-    public function create(string $name, string $email, string $passwordHash, string $role): Account
-    {
+    public function create(
+        string $name,
+        string $email,
+        string $passwordHash,
+        string $role,
+        string $status = 'active',
+        bool $mustChangePassword = true,
+    ): Account {
         $user = User::query()->create([
             'name' => $name,
             'email' => $email,
             'password' => $passwordHash,
             'role' => $role,
+            'status' => $status,
+            'must_change_password' => $mustChangePassword,
         ]);
 
         return $this->toAccount($user);
@@ -44,6 +52,13 @@ final class EloquentAccountRepository implements AccountRepository
 
     private function toAccount(User $user): Account
     {
-        return new Account($user->id, $user->name, $user->email, $user->role);
+        return new Account(
+            $user->id,
+            $user->name,
+            $user->email,
+            $user->role,
+            $user->status,
+            (bool) $user->must_change_password,
+        );
     }
 }

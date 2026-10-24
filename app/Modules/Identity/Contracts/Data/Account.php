@@ -9,5 +9,7 @@ final readonly class Account
         public string $name,
         public string $email,
         public string $role,
+        public string $status = 'active',
+        public bool $mustChangePassword = true,
     ) {}
 }
