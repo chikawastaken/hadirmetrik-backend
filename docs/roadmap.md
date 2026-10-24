@@ -1,8 +1,8 @@
 # HadirMetrik — Milestone & Implementation Roadmap
 
-**Versi:** 1.1  
-**Status:** Phase 0 selesai untuk scope backend; verifikasi koneksi Flutter menunggu repo mobile  
-**Prioritas saat ini:** Phase 1 — Authentication MVP  
+**Versi:** 1.2  
+**Status:** Phase 1 backend selesai (modular monolith, PR #3); item Phase 0/1 yang tersisa bergantung pada repo mobile  
+**Prioritas saat ini:** Menutup integrasi Flutter M1, lalu Phase 2 (backend)  
 **Arsitektur:** Flutter mobile + Laravel modular monolith + PostgreSQL; face-recognition service terpisah hanya jika diperlukan.
 
 ---
@@ -37,7 +37,7 @@
 | Phase | Milestone | Hasil utama | Prioritas |
 |---|---|---|---|
 | 0 | Fondasi proyek dan kontrak API | Repository, environment lokal, struktur backend, kontrak API minimum | Wajib |
-| 1 | **M1 — Authentication MVP** | Register, login, session restoration, `/me`, logout, token aman | **Dikerjakan sekarang** |
+| 1 | **M1 — Authentication MVP** | Register, login, session restoration, `/me`, logout, token aman | **Backend selesai; Flutter menyusul** |
 | 2 | M2 — Identitas karyawan dan akses berbasis peran | Profil karyawan, role/permission dasar, pengelolaan akun karyawan | Tinggi |
 | 3 | M3 — Presensi inti | Check-in/out online, jadwal, lokasi, riwayat dan koreksi | Tinggi |
 | 4 | M4 — Verifikasi wajah dan offline sync | Enrollment, evaluasi face verification, outbox lokal, sinkronisasi idempotent | Tinggi |
@@ -64,7 +64,7 @@ Menyiapkan alur kerja minimum supaya Flutter dan Laravel bisa dikembangkan dan d
 - [x] Tetapkan prefix API `/api/v1`.
 - [x] Tambahkan endpoint health check untuk membedakan service hidup dari database/API bermasalah. — `GET /api/v1/health` (200 sehat, 503 degraded).
 - [x] Buat dokumentasi OpenAPI minimum untuk auth. — `docs/openapi/auth.yaml` + panduan `docs/openapi/README.md`.
-- [x] Tentukan format response sukses dan error yang konsisten. — `App\Http\Resources\ApiResponse` (`success`/`message`/`data`/`errors`).
+- [x] Tentukan format response sukses dan error yang konsisten. — `App\Shared\Http\ApiResponse` (`success`/`message`/`data`/`errors`); sejak Phase 1 kelas ini tinggal di `app/Shared`.
 
 ### Definition of Done
 - [x] Backend dapat dijalankan lokal dan koneksi database terverifikasi (`php artisan serve` + `GET /api/v1/health` mengembalikan `database: connected`).
@@ -78,7 +78,7 @@ Menyiapkan alur kerja minimum supaya Flutter dan Laravel bisa dikembangkan dan d
 
 ---
 
-## 4. Phase 1 — M1: Authentication MVP (Kerjakan Sekarang)
+## 4. Phase 1 — M1: Authentication MVP (Backend Selesai)
 
 ### Tujuan
 Karyawan dapat mendaftar/aktivasi akun, login, tetap login setelah aplikasi ditutup, melihat identitas akun aktif, dan logout.
@@ -97,16 +97,54 @@ Jika layanan email/OTP belum siap, gunakan kode undangan terbatas untuk developm
 
 ### Backend Laravel — pekerjaan
 
-- [ ] Pasang dan konfigurasi Laravel Sanctum untuk API token mobile.
-- [ ] Buat/validasi struktur `users`, `employees`, role atau permission dasar, dan relasinya.
-- [ ] Implementasikan `POST /api/v1/register`.
-- [ ] Implementasikan `POST /api/v1/login`.
-- [ ] Implementasikan `GET /api/v1/me` dengan autentikasi.
-- [ ] Implementasikan `POST /api/v1/logout` untuk mencabut token saat ini.
-- [ ] Tambahkan validasi payload, respons error, rate limiting login/register, dan pencatatan peristiwa keamanan yang relevan.
-- [ ] Pastikan API tidak menerima `role`, `is_admin`, atau status istimewa dari payload registrasi.
-- [ ] Buat seeder data awal untuk pengujian lokal: akun HR, satu karyawan, dan/atau invitation code development.
-- [ ] Tambahkan automated feature tests untuk register, login, `/me`, logout, dan akses tidak sah.
+- [x] Pasang dan konfigurasi Laravel Sanctum untuk API token mobile.
+- [x] Buat/validasi struktur `users`, `employees`, role atau permission dasar, dan relasinya.
+- [x] Implementasikan `POST /api/v1/register`.
+- [x] Implementasikan `POST /api/v1/login`.
+- [x] Implementasikan `GET /api/v1/me` dengan autentikasi.
+- [x] Implementasikan `POST /api/v1/logout` untuk mencabut token saat ini.
+- [x] Tambahkan validasi payload, respons error, rate limiting login/register, dan pencatatan peristiwa keamanan yang relevan.
+- [x] Pastikan API tidak menerima `role`, `is_admin`, atau status istimewa dari payload registrasi.
+- [x] Buat seeder data awal untuk pengujian lokal: akun HR, satu karyawan, dan/atau invitation code development.
+- [x] Tambahkan automated feature tests untuk register, login, `/me`, logout, dan akses tidak sah.
+
+### Status implementasi backend (selesai)
+
+Seluruh item backend di atas sudah dikerjakan, diuji, dan di-commit pada commit
+`4d61000` di branch `feature/auth-modular-monolith` (PR #3, base
+`feature/phase-0-foundation`).
+
+- **Struktur:** modular monolith `app/Modules/{Identity,Employees,Audit}` +
+  `app/Shared`. Tiap modul punya `Contracts/`, `Application/`, `Infrastructure/`,
+  `Http/`, dan `[Module]ServiceProvider`. Route tetap terpusat di `routes/` dan
+  migration tetap di `database/migrations/`. Keputusan dicatat di
+  `docs/adr/0001-modular-monolith-module-contracts.md`.
+- **Batas modul:** lintas modul hanya lewat `Contracts`; data lintas modul berupa
+  readonly DTO, bukan model Eloquent. Ditegakkan otomatis oleh
+  `tests/Architecture/ModuleBoundaryTest.php` (tanpa dependency baru).
+- **Port framework:** Sanctum, hashing, dan transaksi DB berada di balik port
+  (`TokenIssuer`, `PasswordHasher`, `TransactionManager`) dengan implementasi di
+  `Infrastructure/Services`.
+- **Endpoint:** `POST /api/v1/register`, `POST /api/v1/login`, `GET /api/v1/me`,
+  `POST /api/v1/logout` — bentuk respons tetap sesuai `docs/openapi/auth.yaml`.
+- **Perilaku baru di atas Phase 0:**
+  - kolom `users.role`; registrasi **selalu** menetapkan `role=employee` dari
+    backend (field `role`/`is_admin` pada payload diabaikan);
+  - register memverifikasi `employee_number` cocok dengan record HR;
+  - kode undangan dikonsumsi secara atomik di dalam transaksi;
+  - tabel `security_events` mencatat `register.succeeded`, `login.succeeded`,
+    `login.failed`, dan `logout`.
+- **Seeder:** password wajib dari environment (`SEED_ADMIN_PASSWORD`,
+  `SEED_EMPLOYEE_PASSWORD`); tidak ada credential hard-coded. Variabel `SEED_*`
+  didokumentasikan di `.env.example`.
+- **Pengujian:** `php artisan test` → 26 tes / 83 assertion lulus; `pint --test`
+  lulus. Uji manual pada PostgreSQL nyata: register `200`, `employee_number`
+  salah `422`, kode undangan terpakai `422`, akun sudah ada `409`, login `200`,
+  password salah `401`, `/me` `200`, logout `200`, `/me` setelah logout `401`,
+  health `200`.
+
+Item yang **belum** selesai murni ada di sisi Flutter (lihat bagian Flutter dan
+Definition of Done di bawah).
 
 ### Flutter — pekerjaan
 
@@ -200,27 +238,27 @@ secure storage.
 
 M1 dianggap selesai apabila:
 
-- [ ] Register berhasil dengan data karyawan/invitation yang valid.
-- [ ] Register ditolak untuk karyawan yang tidak dikenal, email tidak cocok, undangan tidak valid, atau akun yang sudah terdaftar.
-- [ ] Pengguna bisa login dengan credential yang benar.
-- [ ] Password salah menghasilkan error yang aman dan tidak membocorkan apakah akun tertentu ada.
-- [ ] Endpoint terlindungi menolak request tanpa token atau dengan token tidak valid.
-- [ ] `/me` hanya mengembalikan identitas pengguna terautentikasi.
-- [ ] Token tersimpan aman dan sesi dapat dipulihkan setelah aplikasi ditutup/dibuka kembali.
-- [ ] Logout mencabut token dan membersihkan penyimpanan lokal.
-- [ ] Role ditetapkan di backend dan tidak dapat dinaikkan melalui payload.
-- [ ] Feature tests backend dan alur utama Flutter lulus.
+- [x] Register berhasil dengan data karyawan/invitation yang valid.
+- [x] Register ditolak untuk karyawan yang tidak dikenal, email tidak cocok, undangan tidak valid, atau akun yang sudah terdaftar.
+- [x] Pengguna bisa login dengan credential yang benar.
+- [x] Password salah menghasilkan error yang aman dan tidak membocorkan apakah akun tertentu ada.
+- [x] Endpoint terlindungi menolak request tanpa token atau dengan token tidak valid.
+- [x] `/me` hanya mengembalikan identitas pengguna terautentikasi.
+- [ ] Token tersimpan aman dan sesi dapat dipulihkan setelah aplikasi ditutup/dibuka kembali. _(sisi Flutter)_
+- [ ] Logout mencabut token dan membersihkan penyimpanan lokal. _(pencabutan token backend selesai; pembersihan storage menyusul di Flutter)_
+- [x] Role ditetapkan di backend dan tidak dapat dinaikkan melalui payload.
+- [ ] Feature tests backend dan alur utama Flutter lulus. _(feature tests backend lulus: 26 tes; alur Flutter belum ada)_
 - [ ] Flutter terhubung ke API Laravel yang berjalan di lingkungan development, bukan data dummy saja.
 
 ### Urutan implementasi untuk mempercepat hasil
 
-1. Definisikan request/response auth dan kebijakan registrasi.
-2. Siapkan migration, model `User`/`Employee`, Sanctum, dan seeder akun uji.
-3. Implementasikan login, `/me`, logout, lalu tes dengan Postman/HTTP client.
-4. Implementasikan register dan aturan aktivasi.
-5. Integrasikan Flutter: login → simpan token → `/me` → auto-restore → logout.
-6. Tambahkan register UI dan integrasikan ke backend.
-7. Uji error, token kedaluwarsa/tidak valid, dan restart aplikasi.
+1. Definisikan request/response auth dan kebijakan registrasi. ✅
+2. Siapkan migration, model `User`/`Employee`, Sanctum, dan seeder akun uji. ✅ (modul `Identity`/`Employees`)
+3. Implementasikan login, `/me`, logout, lalu tes dengan Postman/HTTP client. ✅
+4. Implementasikan register dan aturan aktivasi. ✅
+5. Integrasikan Flutter: login → simpan token → `/me` → auto-restore → logout. ⬜
+6. Tambahkan register UI dan integrasikan ke backend. ⬜
+7. Uji error, token kedaluwarsa/tidak valid, dan restart aplikasi. ⬜
 
 Urutan ini memprioritaskan jalur login yang berfungsi sesegera mungkin tanpa menunda aturan keamanan registrasi.
 
@@ -354,20 +392,23 @@ Daftar ini adalah pekerjaan konkret yang dapat langsung dibuat sebagai issue Git
 ### Epic: `AUTH — Authentication MVP`
 
 1. `AUTH-01` — Sepakati kontrak OpenAPI untuk register/login/me/logout. ✅ `docs/openapi/auth.yaml`.
-2. `AUTH-02` — Siapkan migration `users` dan relasi `employees`.
-3. `AUTH-03` — Konfigurasi Laravel Sanctum API tokens.
-4. `AUTH-04` — Seed akun HR development dan data employee uji tanpa credential hard-coded.
-5. `AUTH-05` — Implementasi `POST /auth/login`.
-6. `AUTH-06` — Implementasi middleware auth dan `GET /me`.
-7. `AUTH-07` — Implementasi `POST /auth/logout` dan pencabutan token.
-8. `AUTH-08` — Implementasi register/aktivasi terkontrol.
-9. `AUTH-09` — Tambahkan rate limit dan feature tests backend.
-10. `AUTH-10` — Buat Flutter `ApiClient`, auth model, dan repository.
-11. `AUTH-11` — Buat UI Login dan integrasi API.
-12. `AUTH-12` — Simpan/pulihkan token dengan secure storage.
-13. `AUTH-13` — Buat UI Register dan integrasi API.
-14. `AUTH-14` — Tambahkan logout, guard navigasi, dan session restoration.
-15. `AUTH-15` — Uji end-to-end register → login → `/me` → restart app → logout.
+2. `AUTH-02` — Siapkan migration `users` dan relasi `employees`. ✅ termasuk kolom `users.role`.
+3. `AUTH-03` — Konfigurasi Laravel Sanctum API tokens. ✅
+4. `AUTH-04` — Seed akun HR development dan data employee uji tanpa credential hard-coded. ✅ password dari variabel `SEED_*`.
+5. `AUTH-05` — Implementasi `POST /api/v1/login`. ✅
+6. `AUTH-06` — Implementasi middleware auth dan `GET /api/v1/me`. ✅
+7. `AUTH-07` — Implementasi `POST /api/v1/logout` dan pencabutan token. ✅
+8. `AUTH-08` — Implementasi register/aktivasi terkontrol. ✅
+9. `AUTH-09` — Tambahkan rate limit dan feature tests backend. ✅ 26 tes lulus.
+10. `AUTH-10` — Buat Flutter `ApiClient`, auth model, dan repository. ⬜
+11. `AUTH-11` — Buat UI Login dan integrasi API. ⬜
+12. `AUTH-12` — Simpan/pulihkan token dengan secure storage. ⬜
+13. `AUTH-13` — Buat UI Register dan integrasi API. ⬜
+14. `AUTH-14` — Tambahkan logout, guard navigasi, dan session restoration. ⬜
+15. `AUTH-15` — Uji end-to-end register → login → `/me` → restart app → logout. ⬜
+
+> Catatan: `AUTH-05`–`AUTH-08` pada draf awal menulis path `/auth/*`; kontrak
+> final memakai prefix `/api/v1` sesuai `docs/openapi/auth.yaml`.
 
 ### Urutan branch yang disarankan
 
@@ -375,12 +416,15 @@ Jangan memakai branch permanen `fe` dan `be` sebagai pengganti folder proyek. Gu
 
 ```text
 main
-├── feature/auth-api
-├── feature/auth-flutter
-└── test/auth-integration
+├── feature/phase-0-foundation     # fondasi backend + kontrak API (PR #2)
+└── feature/auth-modular-monolith  # Phase 1 backend, di-stack di atas phase-0 (PR #3)
+    └── feature/auth-flutter       # integrasi M1 (belum dibuat)
 ```
 
 Jika developer backend dan Flutter bekerja paralel, sepakati kontrak API pada `AUTH-01` terlebih dahulu. Backend dapat memakai contoh JSON kontrak untuk membuat test; Flutter dapat membuat repository/API client dengan kontrak sama.
+
+> PR #3 masih berbasis `feature/phase-0-foundation` karena PR #2 belum di-merge.
+> Setelah PR #2 masuk ke `main`, ubah base PR #3 menjadi `main` sebelum merge.
 
 ---
 
@@ -388,16 +432,16 @@ Jika developer backend dan Flutter bekerja paralel, sepakati kontrak API pada `A
 
 MVP auth dianggap siap didemokan jika:
 
-- [ ] Akun uji tersedia melalui seeder yang aman.
-- [ ] Pengguna yang memenuhi syarat dapat mendaftar/aktivasi.
+- [x] Akun uji tersedia melalui seeder yang aman.
+- [x] Pengguna yang memenuhi syarat dapat mendaftar/aktivasi. _(terverifikasi di level API)_
 - [ ] Pengguna dapat login melalui Flutter yang benar-benar memanggil Laravel API.
-- [ ] Login gagal menampilkan pesan yang wajar, tanpa crash.
+- [ ] Login gagal menampilkan pesan yang wajar, tanpa crash. _(backend sudah mengembalikan pesan aman; UI Flutter menyusul)_
 - [ ] Setelah login, aplikasi menampilkan nama/identitas dari endpoint `/me`.
 - [ ] Setelah aplikasi ditutup dan dibuka kembali, sesi dipulihkan dengan validasi ke server.
-- [ ] Logout membuat token lama tidak lagi bisa digunakan.
-- [ ] Endpoint protected menolak request tanpa autentikasi.
-- [ ] Role tidak bisa dimanipulasi dari payload klien.
-- [ ] Tes backend untuk happy path dan failure path lulus.
+- [x] Logout membuat token lama tidak lagi bisa digunakan.
+- [x] Endpoint protected menolak request tanpa autentikasi.
+- [x] Role tidak bisa dimanipulasi dari payload klien.
+- [x] Tes backend untuk happy path dan failure path lulus.
 
 ---
 

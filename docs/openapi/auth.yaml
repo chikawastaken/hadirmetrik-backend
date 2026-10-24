@@ -96,7 +96,7 @@ paths:
                 success: false
                 message: "Akun dengan email ini sudah terdaftar."
         '422':
-          description: Validasi gagal (termasuk email/undangan tidak cocok)
+          description: Validasi gagal (email karyawan, nomor karyawan, atau kode undangan tidak cocok)
           content:
             application/json:
               schema:
@@ -105,8 +105,8 @@ paths:
                 success: false
                 message: "Validasi gagal."
                 errors:
-                  work_email: ["The selected work email is invalid."]
-                  invitation_code: ["The selected invitation code is invalid."]
+                  employee_number: ["Nomor karyawan tidak cocok dengan data HR."]
+                  invitation_code: ["Kode undangan tidak valid atau sudah dipakai."]
         '429':
           $ref: '#/components/responses/TooManyRequests'
 

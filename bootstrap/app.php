@@ -1,6 +1,7 @@
 <?php
 
-use App\Http\Resources\ApiResponse;
+use App\Shared\Exceptions\ApiException;
+use App\Shared\Http\ApiResponse;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -37,6 +38,12 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Framework-level failures must use the same envelope as controller
         // responses so mobile clients only parse one error shape.
+        $exceptions->render(function (ApiException $e, Request $request) use ($isApi) {
+            return $isApi($request)
+                ? ApiResponse::error($e->getMessage(), $e->status(), $e->errors() ?: null)
+                : null;
+        });
+
         $exceptions->render(function (AuthenticationException $e, Request $request) use ($isApi) {
             return $isApi($request)
                 ? ApiResponse::error('Unauthenticated.', 401)
