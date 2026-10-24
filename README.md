@@ -1,58 +1,272 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# HadirMetrik Backend API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Backend RESTful API untuk HadirMetrik — platform absensi karyawan berbasis pengenalan wajah (*face recognition*), manajemen penugasan, dan transparansi kompensasi. Dibangun menggunakan Laravel 13 dengan pendekatan **Modular Monolith** dan kontrak domain terstandarisasi.
 
-## About Laravel
+Panduan ini ditujukan bagi developer (khususnya tim **Frontend Flutter** atau anggota tim baru) untuk menjalankan server lokal dan berkolaborasi dengan lancar.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Daftar Isi
+- [Prasyarat Sistem](#prasyarat-sistem)
+- [Langkah Setup Cepat](#langkah-setup-cepat)
+- [Menjalankan Database via Docker](#menjalankan-database-via-docker)
+- [Konfigurasi Environment (.env)](#konfigurasi-environment-env)
+- [Migrasi & Seeding Data](#migrasi--seeding-data)
+- [Menjalankan Server Backend](#menjalankan-server-backend)
+- [Menjalankan Automated Tests](#menjalankan-automated-tests)
+- [Makefile — Shortcut Perintah](#makefile--shortcut-perintah)
+- [Koneksi dari Aplikasi Flutter / Emulator](#koneksi-dari-aplikasi-flutter--emulator)
+- [Ringkasan Endpoint Autentikasi & Registrasi](#ringkasan-endpoint-autentikasi--registrasi)
+- [Dokumentasi & Arsitektur](#dokumentasi--arsitektur)
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+---
 
-## Learning Laravel
+## Prasyarat Sistem
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+Sebelum memulai, pastikan perangkat lokal Anda telah terinstal:
+- **PHP 8.2+** (disarankan PHP 8.3 / 8.4) beserta ekstensi `pdo_pgsql`, `mbstring`, `openssl`, `curl`.
+- **Composer 2.x**
+- **Docker & Docker Compose** (untuk database PostgreSQL lokal).
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+---
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Langkah Setup Cepat
 
 ```bash
-composer require laravel/boost --dev
+# 1. Clone repository
+git clone <repository-url>
+cd hadirmetrik-backend
 
-php artisan boost:install
+# 2. Install dependensi PHP
+composer install
+
+# 3. Salin konfigurasi environment
+cp .env.example .env
+
+# 4. Generate App Key
+php artisan key:generate
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+> **💡 Shortcut:** Atau cukup jalankan `make setup` — semua langkah di atas (termasuk Docker DB, migrasi, dan seeding) dijalankan secara otomatis.
 
-## Contributing
+---
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Menjalankan Database via Docker
 
-## Code of Conduct
+Proyek ini sudah dilengkapi file `compose.yaml` yang berisi layanan **PostgreSQL 17** dan Web GUI **Adminer**.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### 1. Jalankan Container Database
+Jalankan perintah berikut di root project:
 
-## Security Vulnerabilities
+```bash
+docker compose up -d db
+```
+> **Catatan:** Port default PostgreSQL di-expose ke host pada port **`5433`** (menghindari bentrok dengan PostgreSQL lokal port `5432`). Container mapping: `5433:5432`.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### 2. (Opsional) Menjalankan Adminer (Web Database GUI)
+Bila ingin melihat isi tabel database lewat browser:
 
-## License
+```bash
+docker compose --profile tools up -d
+```
+Akses Adminer di: [http://localhost:8080](http://localhost:8080)
+- **System**: PostgreSQL
+- **Server**: `db` (jika login dari dalam container network) atau `127.0.0.1:5433`
+- **Username**: `hadirmetrik`
+- **Password**: Nilai `POSTGRES_PASSWORD` pada file `.env` Anda
+- **Database**: `hadirmetrik`
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### 3. Menghentikan Docker
+```bash
+docker compose down
+```
+
+---
+
+## Konfigurasi Environment (`.env`)
+
+Sesuaikan variabel database di file `.env` agar sesuai dengan container Docker:
+
+```dotenv
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5433
+DB_DATABASE=hadirmetrik
+DB_USERNAME=hadirmetrik
+DB_PASSWORD=secret-password-anda
+
+POSTGRES_DB=hadirmetrik
+POSTGRES_USER=hadirmetrik
+POSTGRES_PASSWORD=secret-password-anda
+POSTGRES_PORT=5433
+ADMINER_PORT=8080
+
+# Kredensial akun awal untuk seeding (wajib diisi agar seeder bisa berjalan)
+SEED_ADMIN_PASSWORD=adminPassword123!
+SEED_EMPLOYEE_PASSWORD=employeePassword123!
+```
+
+---
+
+## Migrasi & Seeding Data
+
+Setelah database Docker menyala dan `.env` terkonfigurasi:
+
+```bash
+# Jalankan migrasi database
+php artisan migrate
+
+# Jalankan seeder akun awal
+php artisan db:seed
+```
+
+Setelah seeder berjalan, Anda memiliki akun awal:
+1. **HR / Admin**:
+   - Email: `hr@hadirmetrik.local`
+   - Password: Nilai dari `SEED_ADMIN_PASSWORD`
+   - Role: `hr`
+2. **Employee**:
+   - Email: `employee@hadirmetrik.local`
+   - Nomor Karyawan: `EMP-0001`
+   - Password: Nilai dari `SEED_EMPLOYEE_PASSWORD`
+   - Role: `employee`
+
+---
+
+## Menjalankan Server Backend
+
+Jalankan server development:
+
+```bash
+php artisan serve
+```
+Server akan berjalan di: **`http://127.0.0.1:8000`**
+
+### Cek Health Endpoint
+Uji apakah server dan database telah terkoneksi dengan benar:
+```bash
+curl http://127.0.0.1:8000/api/v1/health
+```
+Response sukses:
+```json
+{
+  "success": true,
+  "data": {
+    "status": "healthy",
+    "database": "connected"
+  }
+}
+```
+
+---
+
+## Menjalankan Automated Tests
+
+Test otomatis menggunakan SQLite in-memory, sehingga Anda bisa menjalankannya kapan saja tanpa mempengaruhi database PostgreSQL:
+
+```bash
+php artisan test
+```
+
+---
+
+## Makefile — Shortcut Perintah
+
+Proyek ini menyediakan `Makefile` agar perintah-perintah umum cukup diketik singkat. Jalankan `make help` untuk melihat daftar lengkap.
+
+| Perintah | Fungsi |
+| :--- | :--- |
+| `make setup` | 🚀 Setup lengkap pertama kali (env → install → key → db → migrate → seed) |
+| `make db` | Jalankan container PostgreSQL |
+| `make db-stop` | Hentikan container database |
+| `make db-reset` | ⚠️ Hapus volume DB & buat ulang (data hilang) |
+| `make adminer` | Jalankan Adminer (Web GUI) |
+| `make migrate` | Jalankan migrasi database |
+| `make fresh` | ⚠️ migrate:fresh + db:seed |
+| `make serve` | Jalankan server development (`http://127.0.0.1:8000`) |
+| `make serve-network` | Jalankan server yang bisa diakses dari HP/emulator |
+| `make test` | Jalankan automated test suite |
+| `make clean` | Bersihkan cache Laravel |
+| `make routes` | Tampilkan daftar route API |
+
+---
+
+## Koneksi dari Aplikasi Flutter / Emulator
+
+Untuk menghubungkan aplikasi **Flutter** ke backend lokal:
+
+| Platform Klien | Base URL API |
+| :--- | :--- |
+| **Android Emulator** | `http://10.0.2.2:8000/api/v1` |
+| **iOS Simulator** | `http://127.0.0.1:8000/api/v1` |
+| **Real Device (WiFi Sama)** | `http://<IP-Lokal-Komputer>:8000/api/v1` (jalankan `php artisan serve --host 0.0.0.0`) |
+
+---
+
+## Ringkasan Endpoint Autentikasi & Registrasi
+
+Format envelope response selalu konsisten:
+```json
+{
+  "success": true,
+  "data": { ... },
+  "message": "Opsional"
+}
+```
+
+### 1. Login (`POST /api/v1/auth/login` atau `POST /api/v1/login`)
+Mendukung login menggunakan **email** atau **nomor karyawan** (`employee_number` seperti `HM-0001`):
+
+**Request Payload:**
+```json
+{
+  "identifier": "employee@hadirmetrik.local",
+  "password": "employeePassword123!",
+  "device_name": "Flutter Android Pixel 7"
+}
+```
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "token": "1|sanctum_token_string...",
+    "token_type": "Bearer",
+    "must_change_password": false,
+    "user": {
+      "id": 2,
+      "name": "Karyawan Contoh",
+      "email": "employee@hadirmetrik.local"
+    }
+  },
+  "message": "Login berhasil."
+}
+```
+> **Catatan untuk Flutter:** Jika `must_change_password: true`, arahkan user langsung ke layar ganti password (`/change-password`).
+
+### 2. Informasi Akun Aktif (`GET /api/v1/auth/me` atau `GET /api/v1/me`)
+Headers: `Authorization: Bearer <token>`
+
+### 3. Logout (`POST /api/v1/auth/logout` atau `POST /api/v1/logout`)
+Headers: `Authorization: Bearer <token>`
+
+### 4. Tambah Karyawan oleh HR (`POST /api/v1/hr/employees`)
+Endpoint ini khusus dipanggil oleh user dengan role `hr` atau `admin`. Backend secara otomatis mengenerate `employee_number` (`HM-####`), password sementara 16 karakter CSPRNG (`initial_password`), assignment shift/lokasi, dan token undangan verifikasi wajah.
+
+---
+
+## Dokumentasi & Arsitektur
+
+Untuk pemahaman lebih mendalam mengenai sistem:
+- **Arsitektur Sistem & Spesifikasi Tabel**: [`docs/architecture.md`](docs/architecture.md)
+- **Keputusan Arsitektur (ADR)**:
+  - [ADR 0001: Modular Monolith Boundaries](docs/adr/0001-modular-monolith-module-contracts.md)
+  - [ADR 0002: Auto-generated Employee Number](docs/adr/0002-autogenerated-employee-number.md)
+  - [ADR 0003: System Temporary Password](docs/adr/0003-system-generated-temporary-password.md)
+  - [ADR 0004: Division Master Table](docs/adr/0004-division-master-table.md)
+  - [ADR 0005: Effective-Dated Assignments](docs/adr/0005-effective-dated-assignments.md)
+  - [ADR 0006: Compensation Packages vs Salary](docs/adr/0006-compensation-packages-vs-salary-statements.md)
+  - [ADR 0007: Invitation Token Hash & Rotation](docs/adr/0007-invitation-token-hash-and-rotation.md)
+  - [ADR 0008: Security Events vs Audit Logs](docs/adr/0008-security-events-vs-audit-logs.md)
+- **OpenAPI Specification**: [`docs/openapi/auth.yaml`](docs/openapi/auth.yaml)
+- **Roadmap Proyek**: [`docs/roadmap.md`](docs/roadmap.md)
