@@ -17,5 +17,12 @@ interface AccountRepository
 
     public function existsByEmail(string $email): bool;
 
-    public function create(string $name, string $email, string $passwordHash, string $role): Account;
+    public function create(
+        string $name,
+        string $email,
+        string $passwordHash,
+        string $role,
+        string $status = 'active',
+        bool $mustChangePassword = true,
+    ): Account;
 }

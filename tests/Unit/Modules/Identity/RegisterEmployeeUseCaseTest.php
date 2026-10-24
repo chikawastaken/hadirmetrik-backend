@@ -215,12 +215,18 @@ final class FakeAccountRepository implements AccountRepository
         return in_array($email, $this->existingEmails, true);
     }
 
-    public function create(string $name, string $email, string $passwordHash, string $role): Account
-    {
+    public function create(
+        string $name,
+        string $email,
+        string $passwordHash,
+        string $role,
+        string $status = 'active',
+        bool $mustChangePassword = true,
+    ): Account {
         $this->created[] = compact('name', 'email', 'passwordHash', 'role');
         $this->lastId = count($this->created);
 
-        return new Account($this->lastId, $name, $email, $role);
+        return new Account($this->lastId, $name, $email, $role, $status, $mustChangePassword);
     }
 }
 

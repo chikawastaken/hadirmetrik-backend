@@ -1,8 +1,8 @@
 <?php
 
-// Admin routes — placeholder for Phase 2+
+use App\Modules\Employees\Http\Controllers\HrEmployeeController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware('auth:sanctum')->group(function (): void {
-    // TBD
+Route::middleware('auth:sanctum')->prefix('hr')->group(function (): void {
+    Route::post('employees', [HrEmployeeController::class, 'store']);
 });
