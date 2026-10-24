@@ -19,9 +19,9 @@ final class EloquentEmployeeDirectory implements EmployeeDirectory
         return new EmployeeSummary(
             $employee->id,
             $employee->employee_number,
-            $employee->name,
+            $employee->full_name,
             $employee->work_email,
-            (bool) $employee->is_active,
+            $employee->employment_status !== 'terminated',
         );
     }
 }

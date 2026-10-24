@@ -15,9 +15,9 @@ class RegisterTest extends TestCase
     {
         DB::table('employees')->insert(array_merge([
             'employee_number' => 'EMP-0001',
-            'name' => 'Karyawan Uji',
+            'full_name' => 'Karyawan Uji',
             'work_email' => 'uji@hadirmetrik.local',
-            'is_active' => true,
+            'employment_status' => 'active',
             'created_at' => now(),
             'updated_at' => now(),
         ], $overrides));

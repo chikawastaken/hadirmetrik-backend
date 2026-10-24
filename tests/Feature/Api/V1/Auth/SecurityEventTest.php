@@ -52,9 +52,9 @@ class SecurityEventTest extends TestCase
     {
         $employee = Employee::create([
             'employee_number' => 'EMP-0001',
-            'name' => 'Karyawan Uji',
+            'full_name' => 'Karyawan Uji',
             'work_email' => 'uji@hadirmetrik.local',
-            'is_active' => true,
+            'employment_status' => 'active',
         ]);
 
         InvitationCode::create(['code' => 'INVITE01', 'is_used' => false]);
