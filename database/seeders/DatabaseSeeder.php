@@ -41,7 +41,7 @@ class DatabaseSeeder extends Seeder
             [
                 'employee_number' => $employeeNumber,
                 'name' => 'Karyawan Contoh',
-                'is_active' => true,
+                'employment_status' => 'active',
             ]
         );
 

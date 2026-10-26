@@ -86,6 +86,7 @@ paths:
                     id: 2
                     name: "Karyawan Contoh"
                     email: "karyawan@example.com"
+                    role: "employee"
         '409':
           description: Email sudah terdaftar
           content:
@@ -123,6 +124,7 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
             example:
               email: "karyawan@example.com"
+              role: "employee"
               password: "rahasia123"
               device_name: "Android Pixel 7"
       responses:
@@ -142,6 +144,7 @@ paths:
                     id: 2
                     name: "Karyawan Contoh"
                     email: "karyawan@example.com"
+                    role: "employee"
         '401':
           description: Kredensial salah
           content:
@@ -185,6 +188,7 @@ paths:
                   id: 2
                   name: "Karyawan Contoh"
                   email: "karyawan@example.com"
+                  role: "employee"
         '401':
           description: Tidak terautentikasi (token hilang/invalid/kadaluarsa)
           content:
