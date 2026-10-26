@@ -25,11 +25,6 @@ final class EloquentAccountRepository implements AccountRepository
             : new AccountCredentials($this->toAccount($user), $user->password);
     }
 
-    public function existsByEmail(string $email): bool
-    {
-        return User::query()->where('email', $email)->exists();
-    }
-
     public function create(
         string $name,
         string $email,

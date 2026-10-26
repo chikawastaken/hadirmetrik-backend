@@ -9,7 +9,5 @@ use App\Modules\Employees\Contracts\Data\EmployeeSummary;
  */
 interface EmployeeDirectory
 {
-    public function findByWorkEmail(string $workEmail): ?EmployeeSummary;
-
     public function findByEmployeeNumber(string $employeeNumber): ?EmployeeSummary;
 }

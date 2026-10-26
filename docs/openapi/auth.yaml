@@ -52,65 +52,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
 
-  /api/v1/register:
-    post:
-      summary: Registrasi / aktivasi akun karyawan
-      tags: [Auth]
-      operationId: register
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RegisterRequest'
-            example:
-              employee_number: "EMP-0001"
-              work_email: "karyawan@example.com"
-              password: "rahasia123"
-              password_confirmation: "rahasia123"
-              invitation_code: "A1B2C3D4"
-      responses:
-        '200':
-          description: Registrasi berhasil
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthSuccessResponse'
-              example:
-                success: true
-                message: "Registrasi berhasil. Silakan gunakan token untuk akses selanjutnya."
-                data:
-                  token: "3|AbCdEf..."
-                  token_type: "Bearer"
-                  user:
-                    id: 2
-                    name: "Karyawan Contoh"
-                    email: "karyawan@example.com"
-                    role: "employee"
-        '409':
-          description: Email sudah terdaftar
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResource'
-              example:
-                success: false
-                message: "Akun dengan email ini sudah terdaftar."
-        '422':
-          description: Validasi gagal (email karyawan, nomor karyawan, atau kode undangan tidak cocok)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResource'
-              example:
-                success: false
-                message: "Validasi gagal."
-                errors:
-                  employee_number: ["Nomor karyawan tidak cocok dengan data HR."]
-                  invitation_code: ["Kode undangan tidak valid atau sudah dipakai."]
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-
   /api/v1/login:
     post:
       summary: Login karyawan
@@ -237,7 +178,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: Sanctum
-      description: Token yang diterima dari endpoint /register atau /login.
+      description: Token yang diterima dari endpoint /login.
 
   responses:
     TooManyRequests:
@@ -251,33 +192,6 @@ components:
             message: "Too Many Attempts."
 
   schemas:
-    RegisterRequest:
-      type: object
-      required: [employee_number, work_email, password, password_confirmation, invitation_code]
-      properties:
-        employee_number:
-          type: string
-          description: Nomor pegawai unik sesuai data HR.
-          example: "EMP-0001"
-        work_email:
-          type: string
-          format: email
-          description: Email kerja karyawan yang sudah terdaftar di sistem.
-          example: "karyawan@example.com"
-        password:
-          type: string
-          minLength: 8
-          description: Password akun baru.
-          example: "rahasia123"
-        password_confirmation:
-          type: string
-          description: Konfirmasi password yang sama.
-          example: "rahasia123"
-        invitation_code:
-          type: string
-          description: Kode undangan satu kali dari HR/admin.
-          example: "A1B2C3D4"
-
     LoginRequest:
       type: object
       required: [email, password]
