@@ -3,16 +3,41 @@
 namespace App\Modules\Employees\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Employees\Application\GetEmployeeDetail\GetEmployeeDetailUseCase;
+use App\Modules\Employees\Application\GetEmployeeOptions\GetEmployeeOptionsUseCase;
+use App\Modules\Employees\Application\ResetEmployeePassword\ResetEmployeePasswordUseCase;
 use App\Modules\Employees\Contracts\Data\CreateEmployeeInput;
 use App\Modules\Employees\Contracts\EmployeeCreator;
 use App\Modules\Employees\Http\Requests\CreateEmployeeRequest;
 use App\Shared\Http\ApiResponse;
+use Illuminate\Http\Request;
 
 final class HrEmployeeController extends Controller
 {
     public function __construct(
         private readonly EmployeeCreator $creator,
     ) {}
+
+    public function options(GetEmployeeOptionsUseCase $useCase): ApiResponse
+    {
+        return ApiResponse::success($useCase->execute());
+    }
+
+    public function show(int $id, GetEmployeeDetailUseCase $useCase): ApiResponse
+    {
+        return ApiResponse::success($useCase->execute($id));
+    }
+
+    public function resetPassword(
+        int $id,
+        Request $request,
+        ResetEmployeePasswordUseCase $useCase,
+    ): ApiResponse {
+        return ApiResponse::success(
+            $useCase->execute($id, $request->user()?->id),
+            'Kata sandi sementara berhasil dibuat.',
+        );
+    }
 
     public function store(CreateEmployeeRequest $request): ApiResponse
     {

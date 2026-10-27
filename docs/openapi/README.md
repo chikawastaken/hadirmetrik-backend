@@ -22,6 +22,7 @@ Base path: `/api/v1`. Semua request/response JSON.
 | GET | `/api/v1/health` | — | Cek service + koneksi database (`200` sehat, `503` degraded) |
 | POST | `/api/v1/login` | — | Login, mengembalikan Sanctum token |
 | GET | `/api/v1/me` | Bearer | Profil pengguna terautentikasi |
+| POST | `/api/v1/auth/change-password` | Bearer | Ganti password / keluar dari status wajib ganti password |
 | POST | `/api/v1/logout` | Bearer | Cabut token yang sedang dipakai |
 
 ### Format response
@@ -60,7 +61,7 @@ curl -s http://localhost:8000/api/v1/health | jq
 
 curl -s -X POST http://localhost:8000/api/v1/login \
   -H 'Accept: application/json' -H 'Content-Type: application/json' \
-  -d '{"email":"hr@example.com","password":"password"}' | jq
+  -d '{"identifier":"HM-0001","password":"password"}' | jq
 
 curl -s http://localhost:8000/api/v1/me \
   -H 'Accept: application/json' -H "Authorization: Bearer <TOKEN>" | jq

@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Employees\Http\Middleware\EnsureHrRole;
 use App\Modules\Identity\Http\Middleware\EnsurePasswordIsChanged;
 use App\Shared\Exceptions\ApiException;
 use App\Shared\Http\ApiResponse;
@@ -30,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'password.changed' => EnsurePasswordIsChanged::class,
+            'hr.role' => EnsureHrRole::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
