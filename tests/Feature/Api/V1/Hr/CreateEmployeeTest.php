@@ -2,11 +2,13 @@
 
 namespace Tests\Feature\Api\V1\Hr;
 
+use App\Modules\Employees\Infrastructure\Jobs\SendInvitationDelivery;
 use App\Modules\Employees\Infrastructure\Models\Division;
 use App\Modules\Employees\Infrastructure\Models\Shift;
 use App\Modules\Employees\Infrastructure\Models\WorkLocation;
 use App\Modules\Identity\Infrastructure\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -59,6 +61,8 @@ class CreateEmployeeTest extends TestCase
 
     public function test_hr_can_create_employee_with_auto_generated_credentials_and_invitations(): void
     {
+        Queue::fake();
+
         Sanctum::actingAs($this->hrUser);
 
         $payload = [
@@ -143,6 +147,8 @@ class CreateEmployeeTest extends TestCase
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'employee.created',
         ]);
+
+        Queue::assertPushed(SendInvitationDelivery::class, 2);
     }
 
     public function test_non_hr_cannot_create_employee(): void
