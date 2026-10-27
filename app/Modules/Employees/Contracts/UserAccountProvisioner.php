@@ -14,4 +14,6 @@ interface UserAccountProvisioner
         string $status = 'active',
         bool $mustChangePassword = true,
     ): UserAccountData;
+
+    public function resetPassword(int $userId, string $plainPassword): void;
 }

@@ -41,4 +41,13 @@ final class IdentityUserAccountProvisioner implements UserAccountProvisioner
             $account->mustChangePassword,
         );
     }
+
+    public function resetPassword(int $userId, string $plainPassword): void
+    {
+        $this->accounts->updatePassword(
+            $userId,
+            $this->hasher->hash($plainPassword),
+            true,
+        );
+    }
 }
