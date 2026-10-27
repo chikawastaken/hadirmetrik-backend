@@ -15,6 +15,8 @@ interface AccountRepository
 
     public function findCredentialsByEmail(string $email): ?AccountCredentials;
 
+    public function findCredentialsById(int $id): ?AccountCredentials;
+
     public function create(
         string $name,
         string $email,
@@ -25,4 +27,6 @@ interface AccountRepository
     ): Account;
 
     public function touchLastLogin(int $id): void;
+
+    public function updatePassword(int $id, string $passwordHash, bool $mustChangePassword = false): void;
 }

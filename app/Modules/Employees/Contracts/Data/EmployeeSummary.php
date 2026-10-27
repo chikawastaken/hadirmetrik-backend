@@ -10,5 +10,10 @@ final readonly class EmployeeSummary
         public string $name,
         public string $workEmail,
         public bool $isActive,
+        public ?string $jobTitle = null,
+        public ?int $divisionId = null,
+        public ?string $divisionName = null,
+        public string $employmentStatus = 'active',
+        public ?string $faceRegisteredAt = null,
     ) {}
 }

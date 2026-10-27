@@ -10,4 +10,6 @@ use App\Modules\Employees\Contracts\Data\EmployeeSummary;
 interface EmployeeDirectory
 {
     public function findByEmployeeNumber(string $employeeNumber): ?EmployeeSummary;
+
+    public function findByUserId(int $userId): ?EmployeeSummary;
 }
