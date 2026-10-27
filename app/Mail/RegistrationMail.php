@@ -13,15 +13,15 @@ class RegistrationMail extends Mailable
 
     public Account $account;
 
-    public string $token;
+    public string $verificationUrl;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(Account $account, string $token)
+    public function __construct(Account $account, string $verificationUrl)
     {
         $this->account = $account;
-        $this->token = $token;
+        $this->verificationUrl = $verificationUrl;
     }
 
     /**
@@ -34,7 +34,7 @@ class RegistrationMail extends Mailable
             ->with([
                 'name' => $this->account->name,
                 'email' => $this->account->email,
-                'token' => $this->token,
+                'verificationUrl' => $this->verificationUrl,
                 'logoUrl' => asset('images/logo.png'),
             ]);
     }

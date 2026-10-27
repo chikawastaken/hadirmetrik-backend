@@ -15,6 +15,7 @@ use App\Modules\Identity\Contracts\PasswordHasher;
 use App\Modules\Identity\Contracts\TokenIssuer;
 use App\Shared\Contracts\TransactionManager;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
 
 /**
  * Registers an employee against a pre-existing HR record and a one-time
@@ -63,9 +64,17 @@ final class RegisterEmployeeUseCase
 
             $issuedToken = $this->tokens->issue($account, 'mobile');
 
-            // Send custom registration email with verification token
+            $verificationUrl = URL::temporarySignedRoute(
+                'verification.verify',
+                now()->addMinutes(60),
+                [
+                    'id' => $account->id,
+                    'hash' => sha1($account->email),
+                ],
+            );
+
             Mail::to($account->email)
-                ->send(new RegistrationMail($account, $issuedToken->token));
+                ->send(new RegistrationMail($account, $verificationUrl));
 
             return new AuthResult($account, $issuedToken);
         });

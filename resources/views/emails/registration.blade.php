@@ -13,7 +13,7 @@
         <p>Hai {{ $name }},</p>
         <p>Terima kasih telah mendaftar di {{ config('app.name') }}. Silakan klik tombol di bawah untuk memverifikasi alamat email Anda:</p>
         <p style="text-align:center; margin:30px 0;">
-            <a href="{{ url('/email/verify/'.$account->id.'/'.$token) }}" style="background:#1d72b8; color:#fff; padding:12px 20px; text-decoration:none; border-radius:4px;">Verifikasi Email</a>
+            <a href="{{ $verificationUrl }}" style="background:#1d72b8; color:#fff; padding:12px 20px; text-decoration:none; border-radius:4px;">Verifikasi Email</a>
         </p>
         <p>Jika Anda tidak melakukan pendaftaran, abaikan email ini.</p>
         <hr />

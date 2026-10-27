@@ -168,6 +168,18 @@ Test otomatis menggunakan SQLite in-memory, sehingga Anda bisa menjalankannya ka
 php artisan test
 ```
 
+Mailer test mengikuti konfigurasi `MAIL_MAILER` di environment. Jika `.env` memakai SMTP sandbox, test registrasi yang berhasil akan mengirim email sungguhan ke alamat `work_email` test; sesuaikan alamat penerima jika sandbox membatasi penerima.
+
+Untuk menguji tautan email dengan akun yang tetap tersimpan di database aplikasi lokal (bukan database in-memory milik test), gunakan:
+
+```bash
+php artisan email:verification-test alamat-email-sandbox@example.com
+```
+
+Perintah ini hanya berjalan pada `APP_ENV=local`, meminta konfirmasi sebelum menulis ke database, meminta password secara tersembunyi dua kali di terminal, membuat data karyawan/undangan uji bila diperlukan, lalu mendaftarkan akun dan mengirim tautan via mailer di `.env`. Data uji tersimpan permanen; gunakan alamat email baru yang dapat menerima email sandbox. Test otomatis biasa tetap memakai SQLite in-memory.
+
+Link verifikasi email memakai URL bertanda tangan dan berlaku selama 60 menit. Link dari email lama sebelum fitur ini diperbaiki perlu diganti dengan email verifikasi baru.
+
 ---
 
 ## Makefile — Shortcut Perintah
