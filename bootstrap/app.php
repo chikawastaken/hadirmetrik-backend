@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Identity\Http\Middleware\EnsurePasswordIsChanged;
 use App\Shared\Exceptions\ApiException;
 use App\Shared\Http\ApiResponse;
 use Illuminate\Auth\AuthenticationException;
@@ -26,6 +27,10 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->throttleApi();
+
+        $middleware->alias([
+            'password.changed' => EnsurePasswordIsChanged::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

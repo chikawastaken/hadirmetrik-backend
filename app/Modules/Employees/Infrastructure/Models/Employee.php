@@ -4,6 +4,7 @@ namespace App\Modules\Employees\Infrastructure\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'user_id',
@@ -41,5 +42,10 @@ class Employee extends Model
     public function getIsActiveAttribute(): bool
     {
         return $this->employment_status !== 'terminated';
+    }
+
+    public function division(): BelongsTo
+    {
+        return $this->belongsTo(Division::class);
     }
 }

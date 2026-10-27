@@ -1,10 +1,13 @@
 <?php
 
-use App\Modules\Identity\Application\RegisterEmployee\RegisterEmployeeInput;
-use App\Modules\Identity\Application\RegisterEmployee\RegisterEmployeeUseCase;
+use App\Mail\RegistrationMail;
+use App\Modules\Identity\Contracts\AccountRepository;
+use App\Modules\Identity\Contracts\PasswordHasher;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Symfony\Component\Console\Command\Command;
@@ -13,7 +16,11 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('email:verification-test {email}', function (string $email, RegisterEmployeeUseCase $useCase) {
+Artisan::command('email:verification-test {email}', function (
+    string $email,
+    AccountRepository $accounts,
+    PasswordHasher $hasher,
+) {
     if (! app()->environment('local')) {
         $this->error('Perintah ini hanya boleh dijalankan pada APP_ENV=local.');
 
@@ -55,10 +62,9 @@ Artisan::command('email:verification-test {email}', function (string $email, Reg
     }
 
     $employee = DB::table('employees')->where('work_email', $email)->first();
-    $employeeNumber = $employee?->employee_number ?? 'EMP-VERIFY-'.Str::upper(Str::random(8));
-    $invitationCode = 'INV-VERIFY-'.Str::upper(Str::random(12));
+    $employeeNumber = $employee?->employee_number ?? 'HM-VERIFY-'.Str::upper(Str::random(8));
 
-    DB::transaction(function () use ($employee, $employeeNumber, $email, $invitationCode, $password, $useCase): void {
+    $account = DB::transaction(function () use ($accounts, $email, $employee, $employeeNumber, $hasher, $password) {
         if ($employee === null) {
             DB::table('employees')->insert([
                 'employee_number' => $employeeNumber,
@@ -70,20 +76,32 @@ Artisan::command('email:verification-test {email}', function (string $email, Reg
             ]);
         }
 
-        DB::table('invitation_codes')->insert([
-            'code' => $invitationCode,
-            'is_used' => false,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-
-        $useCase->execute(new RegisterEmployeeInput(
-            $employeeNumber,
+        $account = $accounts->create(
+            'Email Verification Test',
             $email,
-            $password,
-            $invitationCode,
-        ));
+            $hasher->hash($password),
+            'employee',
+            'active',
+            false,
+        );
+
+        DB::table('employees')
+            ->where('work_email', $email)
+            ->update(['user_id' => $account->id, 'updated_at' => now()]);
+
+        return $account;
     });
+
+    $verificationUrl = URL::temporarySignedRoute(
+        'verification.verify',
+        now()->addMinutes(60),
+        [
+            'id' => $account->id,
+            'hash' => sha1($account->email),
+        ],
+    );
+
+    Mail::to($account->email)->send(new RegistrationMail($account, $verificationUrl));
 
     $this->info("Akun uji tersimpan dan email verifikasi dikirim ke {$email}.");
 

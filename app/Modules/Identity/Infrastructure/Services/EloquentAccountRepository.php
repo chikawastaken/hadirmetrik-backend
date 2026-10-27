@@ -25,6 +25,15 @@ final class EloquentAccountRepository implements AccountRepository
             : new AccountCredentials($this->toAccount($user), $user->password);
     }
 
+    public function findCredentialsById(int $id): ?AccountCredentials
+    {
+        $user = User::query()->find($id);
+
+        return $user === null
+            ? null
+            : new AccountCredentials($this->toAccount($user), $user->password);
+    }
+
     public function create(
         string $name,
         string $email,
@@ -60,5 +69,14 @@ final class EloquentAccountRepository implements AccountRepository
     public function touchLastLogin(int $id): void
     {
         User::query()->where('id', $id)->update(['last_login_at' => now()]);
+    }
+
+    public function updatePassword(int $id, string $passwordHash, bool $mustChangePassword = false): void
+    {
+        User::query()->whereKey($id)->update([
+            'password' => $passwordHash,
+            'must_change_password' => $mustChangePassword,
+            'remember_token' => null,
+        ]);
     }
 }
