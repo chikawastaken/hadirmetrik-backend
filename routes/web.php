@@ -10,7 +10,6 @@ Route::get('/', function () {
         'health' => url('/api/v1/health'),
     ]);
 });
-
 Route::get('/email/verify/{id}/{hash}', VerifyEmailController::class)
     ->middleware('signed')
     ->name('verification.verify');

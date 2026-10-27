@@ -2,8 +2,6 @@
 
 namespace Tests\Feature\Api\V1\Auth;
 
-use App\Modules\Employees\Infrastructure\Models\Employee;
-use App\Modules\Employees\Infrastructure\Models\InvitationCode;
 use App\Modules\Identity\Infrastructure\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -45,30 +43,6 @@ class SecurityEventTest extends TestCase
         $this->assertDatabaseHas('security_events', [
             'event' => 'login.failed',
             'actor_user_id' => null,
-        ]);
-    }
-
-    public function test_a_registration_is_recorded(): void
-    {
-        $employee = Employee::create([
-            'employee_number' => 'EMP-0001',
-            'full_name' => 'Karyawan Uji',
-            'work_email' => 'uji@hadirmetrik.local',
-            'employment_status' => 'active',
-        ]);
-
-        InvitationCode::create(['code' => 'INVITE01', 'is_used' => false]);
-
-        $this->postJson('/api/v1/register', [
-            'employee_number' => 'EMP-0001',
-            'work_email' => 'uji@hadirmetrik.local',
-            'password' => 'rahasia123',
-            'password_confirmation' => 'rahasia123',
-            'invitation_code' => 'INVITE01',
-        ])->assertOk();
-
-        $this->assertDatabaseHas('security_events', [
-            'event' => 'register.succeeded',
         ]);
     }
 }

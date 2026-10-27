@@ -5,7 +5,7 @@ Folder ini memuat kontrak API yang disepakati bersama oleh developer backend
 
 | File | Isi |
 |------|-----|
-| `auth.yaml` | Kontrak minimum untuk health check + autentikasi (register, login, `/me`, logout). |
+| `auth.yaml` | Kontrak minimum untuk health check + autentikasi (login, `/me`, logout). |
 
 ## Cara membuka
 
@@ -20,7 +20,6 @@ Base path: `/api/v1`. Semua request/response JSON.
 | Method | Path | Auth | Fungsi |
 |--------|------|------|--------|
 | GET | `/api/v1/health` | — | Cek service + koneksi database (`200` sehat, `503` degraded) |
-| POST | `/api/v1/register` | — | Registrasi/aktivasi karyawan dengan kode undangan |
 | POST | `/api/v1/login` | — | Login, mengembalikan Sanctum token |
 | GET | `/api/v1/me` | Bearer | Profil pengguna terautentikasi |
 | POST | `/api/v1/logout` | Bearer | Cabut token yang sedang dipakai |
@@ -45,7 +44,7 @@ cukup menangani satu bentuk error.
 
 ### Alur token
 
-1. Flutter memanggil `/register` atau `/login`.
+1. Flutter memanggil `/login`.
 2. Backend mengembalikan `data.token` (Sanctum personal access token).
 3. Flutter menyimpan token di secure storage (**bukan** SharedPreferences).
 4. Setiap request terproteksi mengirim `Authorization: Bearer <token>` dan `Accept: application/json`.

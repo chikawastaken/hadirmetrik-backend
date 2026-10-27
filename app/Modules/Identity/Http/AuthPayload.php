@@ -24,7 +24,7 @@ final class AuthPayload
     }
 
     /**
-     * @return array{id: int, name: string, email: string}
+     * @return array{id: int, name: string, email: string, role: string}
      */
     public static function user(Account $account): array
     {
@@ -32,6 +32,7 @@ final class AuthPayload
             'id' => $account->id,
             'name' => $account->name,
             'email' => $account->email,
+            'role' => $account->role,
         ];
     }
 }

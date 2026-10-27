@@ -15,8 +15,6 @@ interface AccountRepository
 
     public function findCredentialsByEmail(string $email): ?AccountCredentials;
 
-    public function existsByEmail(string $email): bool;
-
     public function create(
         string $name,
         string $email,

@@ -3,7 +3,6 @@
 namespace Database\Seeders;
 
 use App\Modules\Employees\Infrastructure\Models\Employee;
-use App\Modules\Employees\Infrastructure\Models\InvitationCode;
 use App\Modules\Identity\Infrastructure\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -41,7 +40,7 @@ class DatabaseSeeder extends Seeder
             [
                 'employee_number' => $employeeNumber,
                 'name' => 'Karyawan Contoh',
-                'is_active' => true,
+                'employment_status' => 'active',
             ]
         );
 
@@ -53,21 +52,6 @@ class DatabaseSeeder extends Seeder
                 'role' => 'employee',
             ]
         );
-
-        $invitationCode = env('SEED_INVITATION_CODE');
-
-        if (is_string($invitationCode) && $invitationCode !== '') {
-            InvitationCode::firstOrCreate(
-                ['code' => $invitationCode],
-                ['is_used' => false],
-            );
-
-            $this->command?->info("Invitation code available: {$invitationCode}");
-        } else {
-            $this->command?->warn(
-                'SEED_INVITATION_CODE is not set; no invitation code was created.'
-            );
-        }
     }
 
     private function requiredEnv(string $key): string

@@ -3,7 +3,6 @@
 use App\Modules\Identity\Http\Controllers\LoginController;
 use App\Modules\Identity\Http\Controllers\LogoutController;
 use App\Modules\Identity\Http\Controllers\MeController;
-use App\Modules\Identity\Http\Controllers\RegisterController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -12,7 +11,7 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 |
 | Authentication endpoints for mobile clients.
-| Public routes: register, login
+| Public routes: login
 | Protected routes: me, logout
 |
 | Routes are centralized here (modules never load their own routes); each
@@ -20,7 +19,6 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::post('/register', RegisterController::class);
 Route::post('/login', LoginController::class);
 
 Route::middleware('auth:sanctum')->group(function (): void {
