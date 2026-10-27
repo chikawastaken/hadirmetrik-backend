@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Identity\Http\Controllers\VerifyEmailController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -9,3 +10,6 @@ Route::get('/', function () {
         'health' => url('/api/v1/health'),
     ]);
 });
+Route::get('/email/verify/{id}/{hash}', VerifyEmailController::class)
+    ->middleware('signed')
+    ->name('verification.verify');
