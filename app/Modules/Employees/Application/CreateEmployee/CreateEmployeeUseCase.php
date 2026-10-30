@@ -4,20 +4,18 @@ namespace App\Modules\Employees\Application\CreateEmployee;
 
 use App\Modules\Audit\Contracts\AuditLogger;
 use App\Modules\Employees\Application\Exceptions\EmployeeCreationFailed;
+use App\Modules\Employees\Application\Invitations\IssueInvitation;
 use App\Modules\Employees\Contracts\Data\CreateEmployeeInput;
 use App\Modules\Employees\Contracts\Data\CreateEmployeeResult;
 use App\Modules\Employees\Contracts\EmployeeCreator;
 use App\Modules\Employees\Contracts\EmployeeNumberGenerator;
-use App\Modules\Employees\Contracts\InvitationTokenGenerator;
 use App\Modules\Employees\Contracts\TemporaryPasswordGenerator;
 use App\Modules\Employees\Contracts\UserAccountProvisioner;
 use App\Modules\Employees\Infrastructure\Models\Division;
 use App\Modules\Employees\Infrastructure\Models\Employee;
 use App\Modules\Employees\Infrastructure\Models\EmployeeCompensation;
-use App\Modules\Employees\Infrastructure\Models\EmployeeInvitation;
 use App\Modules\Employees\Infrastructure\Models\EmployeeShiftAssignment;
 use App\Modules\Employees\Infrastructure\Models\EmployeeWorkLocationAssignment;
-use App\Modules\Employees\Infrastructure\Models\InvitationDelivery;
 use App\Modules\Employees\Infrastructure\Models\Shift;
 use App\Modules\Employees\Infrastructure\Models\WorkLocation;
 use App\Shared\Contracts\TransactionManager;
@@ -28,7 +26,7 @@ final class CreateEmployeeUseCase implements EmployeeCreator
         private readonly UserAccountProvisioner $userProvisioner,
         private readonly EmployeeNumberGenerator $numberGenerator,
         private readonly TemporaryPasswordGenerator $passwordGenerator,
-        private readonly InvitationTokenGenerator $tokenGenerator,
+        private readonly IssueInvitation $issueInvitation,
         private readonly AuditLogger $auditLogger,
         private readonly TransactionManager $transaction,
     ) {}
@@ -147,56 +145,11 @@ final class CreateEmployeeUseCase implements EmployeeCreator
             // Handle invitation
             $invitationData = null;
             if ($input->sendInvitation) {
-                $tokenPair = $this->tokenGenerator->generate();
-                $expiresAt = now()->addDays($input->invitationExpiresInDays);
-
-                $invitation = EmployeeInvitation::query()->create([
-                    'employee_id' => $employee->id,
-                    'purpose' => 'face_enrollment',
-                    'token_hash' => $tokenPair['token_hash'],
-                    'status' => 'pending',
-                    'requested_channels' => $input->invitationChannels,
-                    'expires_at' => $expiresAt,
-                    'attempts' => 0,
-                    'created_by' => $actorUserId ?? $account->id,
-                ]);
-
-                $deliveries = [];
-                foreach ($input->invitationChannels as $channel) {
-                    $recipient = $channel === 'whatsapp' ? $phoneE164 : strtolower(trim($input->email));
-                    $delivery = InvitationDelivery::query()->create([
-                        'invitation_id' => $invitation->id,
-                        'channel' => $channel,
-                        'recipient' => (string) $recipient,
-                        'status' => 'queued',
-                        'attempt' => 1,
-                    ]);
-                    $deliveries[] = [
-                        'channel' => $delivery->channel,
-                        'recipient' => $delivery->recipient,
-                        'status' => $delivery->status,
-                    ];
-                }
-
-                $invitationData = [
-                    'id' => $invitation->id,
-                    'status' => $invitation->status,
-                    'requested_channels' => $invitation->requested_channels,
-                    'expires_at' => $invitation->expires_at->toIso8601String(),
-                    'deliveries' => $deliveries,
-                ];
-
-                $this->auditLogger->log(
-                    entityType: 'invitation',
-                    entityId: (string) $invitation->id,
-                    action: 'invitation.created',
-                    afterSnapshot: [
-                        'employee_id' => $employee->id,
-                        'purpose' => $invitation->purpose,
-                        'status' => $invitation->status,
-                        'channels' => $input->invitationChannels,
-                    ],
-                    actorUserId: $actorUserId,
+                $invitationData = $this->issueInvitation->execute(
+                    employee: $employee,
+                    channels: $input->invitationChannels,
+                    expiresInDays: $input->invitationExpiresInDays,
+                    actorUserId: $actorUserId ?? $account->id,
                 );
             }
 
