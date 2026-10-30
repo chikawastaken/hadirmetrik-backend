@@ -2891,6 +2891,7 @@ Before production, review applicable Indonesian personal-data protection require
 - 32 byte random (CSPRNG); disimpan sebagai **hash SHA-256 + pepper** (pepper di environment server); perbandingan hash memakai constant-time compare.
 - One-time use; expiry default 3 hari; dapat direvoke; resend **merotasi** token (undangan lama menjadi `revoked`, dibuat undangan baru).
 - Link memakai `https://api.<domain>/…` dengan header `Referrer-Policy: no-referrer`, tidak muncul di analytics/log, dan disarankan pattern exchange: setelah employee login, token dipertukarkan dengan operasi server-side tanpa token tersentuh klien lagi.
+- **Dev (sementara):** aplikasi email dan preview Mailtrap memblokir skema kustom `hadirmetrik://`, sehingga link email memakai halaman perantara HTTP `GET /invitations/{token}` (`InvitationBridgeController`) yang menampilkan tombol ke `intent://…` (Android) dan `hadirmetrik://…` (iOS). Halaman ini tidak memvalidasi token — validasi tetap di endpoint accept — dan mengirim `Referrer-Policy: no-referrer` serta `X-Robots-Tag: noindex`. Untuk produksi ganti dengan HTTPS universal/App Link terverifikasi dan pattern exchange di atas.
 
 **Pengiriman (email/WhatsApp):**
 
