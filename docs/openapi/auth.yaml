@@ -305,6 +305,106 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
+  /api/v1/me/profile:
+    get:
+      summary: Profil karyawan sendiri
+      tags: [Auth]
+      operationId: getMeProfile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profil karyawan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+              example:
+                success: true
+                data:
+                  employee:
+                    id: 251
+                    employee_number: "HM-0251"
+                    full_name: "Putri Ramadhani"
+                    work_email: "putri.r@sinarmetrik.co.id"
+                    job_title: "Staf Admin Gudang"
+                    division:
+                      id: 1
+                      name: "Operasional"
+                    employment_status: "probation"
+                    face_registered: true
+                    face_registered_at: "2026-10-01T08:00:00Z"
+                    manager:
+                      id: 102
+                      full_name: "Dimas Ardiansyah"
+                  compensation:
+                    base_salary: 8500000
+                    allowance: 1200000
+                    deductions: 450000
+                  shift_assignment:
+                    shift_id: 3
+                    shift_name: "Shift Pagi"
+                    start_time: "08:00"
+                    end_time: "17:00"
+                  work_location_assignment:
+                    work_location_id: 2
+                    work_location_name: "Kantor Pusat Yogyakarta"
+                  invitation:
+                    code: "INV-2026-10-01-ABCD"
+                    status: "accepted"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    patch:
+      summary: Perbarui profil karyawan sendiri
+      tags: [Auth]
+      operationId: patchMeProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfilePatchRequest'
+            example:
+              phone_e164: "+6281234567890"
+              job_title: "Staf Senior Admin Gudang"
+              division_id: 2
+              work_email: "putri.r@sinarmetrik.co.id"
+      responses:
+        '200':
+          description: Profil berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileResponse'
+              example:
+                success: true
+                message: "Profil berhasil diperbarui."
+                data:
+                  employee:
+                    id: 251
+                    employee_number: "HM-0251"
+                    full_name: "Putri Ramadhani"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Validasi gagal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Validasi gagal."
+                errors:
+                  division_id: ["Divisi tidak aktif atau tidak ditemukan."]
+                  work_email: ["Email sudah digunakan oleh karyawan lain."]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
   /api/v1/logout:
     post:
       summary: Logout — cabut token saat ini
@@ -533,6 +633,136 @@ components:
             must_change_password:
               type: boolean
               example: false
+
+    ProfilePatchRequest:
+      type: object
+      required: [work_email]
+      properties:
+        phone_e164:
+          type: [string, "null"]
+          description: Nomor telepon E.164 (contoh +6281234567890).
+          pattern: '^\+[1-9]\d{1,14}$'
+        job_title:
+          type: [string, "null"]
+          description: Jabatan pekerjaan.
+        division_id:
+          type: [integer, "null"]
+          description: ID divisi aktif.
+        work_email:
+          type: string
+          format: email
+          description: Email kerja (unik di tabel employees).
+
+    ProfileResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: [string, "null"]
+        data:
+          type: object
+          required: [employee]
+          properties:
+            employee:
+              $ref: '#/components/schemas/EmployeeProfileData'
+            compensation:
+              $ref: '#/components/schemas/CompensationData'
+            shift_assignment:
+              $ref: '#/components/schemas/ShiftAssignmentData'
+            work_location_assignment:
+              $ref: '#/components/schemas/WorkLocationAssignmentData'
+            invitation:
+              $ref: '#/components/schemas/InvitationData'
+            manager:
+              $ref: '#/components/schemas/EmployeeProfileData'
+
+    EmployeeProfileData:
+      type: object
+      required:
+        - id
+        - employee_number
+        - full_name
+        - work_email
+        - job_title
+        - division
+        - employment_status
+        - face_registered
+        - face_registered_at
+      properties:
+        id:
+          type: integer
+        employee_number:
+          type: string
+        full_name:
+          type: string
+        work_email:
+          type: string
+          format: email
+        job_title:
+          type: [string, "null"]
+        division:
+          oneOf:
+            - type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+            - type: "null"
+        employment_status:
+          type: string
+          enum: [probation, active, contract, terminated]
+        face_registered:
+          type: boolean
+        face_registered_at:
+          type: [string, "null"]
+          format: date-time
+        manager:
+          oneOf:
+            - $ref: '#/components/schemas/EmployeeProfileData'
+            - type: "null"
+
+    CompensationData:
+      type: object
+      properties:
+        base_salary:
+          type: number
+        allowance:
+          type: number
+        deductions:
+          type: number
+
+    ShiftAssignmentData:
+      type: object
+      properties:
+        shift_id:
+          type: integer
+        shift_name:
+          type: string
+        start_time:
+          type: string
+        end_time:
+          type: string
+
+    WorkLocationAssignmentData:
+      type: object
+      properties:
+        work_location_id:
+          type: integer
+        work_location_name:
+          type: string
+
+    InvitationData:
+      type: object
+      properties:
+        code:
+          type: string
+        status:
+          type: string
 
     LogoutResponse:
       type: object
