@@ -5,8 +5,8 @@ namespace App\Modules\Identity\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Employees\Contracts\EmployeeDirectory;
 use App\Modules\Identity\Application\GetAuthenticatedUser\GetAuthenticatedUserUseCase;
-use App\Modules\Identity\Http\AuthPayload;
 use App\Shared\Http\ApiResponse;
+use App\Shared\Http\AuthPayload;
 use Illuminate\Http\Request;
 
 final class MeController extends Controller

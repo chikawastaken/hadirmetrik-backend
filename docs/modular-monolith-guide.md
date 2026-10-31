@@ -53,7 +53,7 @@ flowchart TB
 | `Employees` | Profil karyawan, divisi, shift, lokasi kerja, kompensasi, undangan & pengiriman, use case create employee oleh HR |
 | `Audit` | Pencatatan `audit_logs` (aksi consequential) dan `security_events` (telemetri autentikasi) — lihat ADR 0008 |
 
-`app/Shared` **bukan modul**. Isinya hanya hal lintas-modul yang benar-benar generik: envelope respons (`ApiResponse`), basis exception domain (`ApiException`), dan port `TransactionManager`.
+`app/Shared` **bukan modul**. Isinya hanya hal lintas-modul yang benar-benar generik: envelope respons (`ApiResponse`), pembentuk payload autentikasi (`AuthPayload`), basis exception domain (`ApiException`), dan port `TransactionManager`.
 
 ### 2.2 Modul target (dari architecture.md §3.3)
 
@@ -104,8 +104,7 @@ app/Modules/Identity/
 │       └── SanctumTokenIssuer.php
 └── Http/                           # delivery layer (privat)
     ├── Controllers/LoginController.php
-    ├── Requests/LoginRequest.php
-    └── AuthPayload.php             #   pembentuk payload respons
+    └── Requests/LoginRequest.php
 ```
 
 ### Peran tiap lapisan

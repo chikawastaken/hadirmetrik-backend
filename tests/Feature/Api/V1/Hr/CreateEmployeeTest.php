@@ -97,7 +97,9 @@ class CreateEmployeeTest extends TestCase
             ->assertJsonPath('data.must_change_password', true)
             ->assertJsonPath('data.invitation.status', 'pending');
 
-        $this->assertNotEmpty($response->json('data.initial_password'));
+        // The employee sets their own password from the invitation link
+        // (§4.8), so the temporary one never leaves the server.
+        $this->assertArrayNotHasKey('initial_password', $response->json('data'));
 
         // Assert database assertions
         $this->assertDatabaseHas('users', [
@@ -186,5 +188,29 @@ class CreateEmployeeTest extends TestCase
             ->assertJsonPath('success', false)
             ->assertJsonPath('message', 'Selected division is not found or inactive.')
             ->assertJsonPath('errors.division_id.0', 'Selected division is not found or inactive.');
+    }
+
+    public function test_employee_created_without_invitation_returns_the_temporary_password(): void
+    {
+        Sanctum::actingAs($this->hrUser);
+
+        $response = $this->postJson('/api/v1/hr/employees', [
+            'full_name' => 'Karyawan Tanpa Undangan',
+            'email' => 'tanpa.undangan@hadirmetrik.local',
+            'division_id' => $this->division->id,
+            'job_title' => 'Staf',
+            'employment_start' => '2026-10-12',
+            'shift_id' => $this->shift->id,
+            'work_location_id' => $this->location->id,
+            'compensation' => ['base_salary' => 4800000],
+            'send_invitation' => false,
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.must_change_password', true)
+            ->assertJsonMissingPath('data.invitation');
+
+        $this->assertNotEmpty($response->json('data.initial_password'));
     }
 }

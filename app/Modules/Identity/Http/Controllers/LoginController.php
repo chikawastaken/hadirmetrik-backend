@@ -5,9 +5,9 @@ namespace App\Modules\Identity\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Identity\Application\Login\LoginInput;
 use App\Modules\Identity\Application\Login\LoginUseCase;
-use App\Modules\Identity\Http\AuthPayload;
 use App\Modules\Identity\Http\Requests\LoginRequest;
 use App\Shared\Http\ApiResponse;
+use App\Shared\Http\AuthPayload;
 
 final class LoginController extends Controller
 {
