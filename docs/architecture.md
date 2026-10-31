@@ -399,7 +399,7 @@ sequenceDiagram
     API->>Q: Dispatch job pengiriman undangan (per channel, idempotent)
     API-->>UI: Data employee + employee_number + status undangan + status delivery per channel + initial_password (ditampilkan sekali)
     Q-->>DB: INSERT invitation_deliveries; UPDATE sent_at / last_sent_at
-    Note over HR,UI: HR menyampaikan initial_password lewat kanal terpisah (bukan email/WhatsApp undangan). Password tidak pernah disimpan plaintext dan tidak masuk log.
+    Note over HR,UI: initial_password hanya relevan bila undangan tidak dikirim (employee tanpa undangan). Bila undangan dikirim, karyawan membuat sendiri kata sandinya lewat link (§4.8), jadi HR tidak perlu menyampaikan apa pun. Password tidak pernah disimpan plaintext dan tidak masuk log.
 ```
 
 **Catatan transaksi:** seluruh insert di atas harus atomik. Jika penyisipan salah satu bagian gagal (misal `EMAIL_TAKEN`), transaksi rollback dan tidak ada user/employee/undangan yang tertinggal. Job pengiriman baru dispatch setelah commit (idempotency diatur §8.2).
@@ -425,6 +425,27 @@ sequenceDiagram
 ```
 
 ### 4.8 Login, Wajib Ganti Password, Accept Undangan, Enrollment Wajah
+
+**Jalur link undangan (tanpa kata sandi sementara).** Karyawan yang menerima undangan tidak perlu menunggu kata sandi dari HR; link undangan sendiri menjadi kredensial sekali pakai:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Employee as Karyawan
+    participant App as Flutter App
+    participant API as Laravel API
+    participant DB as PostgreSQL
+
+    Employee->>App: Buka link undangan dari email (halaman perantara §12.6)
+    App->>API: POST /api/v1/invitations/{token}/password (new_password + konfirmasi)
+    API->>DB: Validasi token (hash constant-time, status pending/sent, belum expired, purpose=face_enrollment)
+    API->>DB: UPDATE users SET password=hash_baru, must_change_password=false; security_events password.changed
+    API-->>App: Token sesi + profil user (must_change_password=false)
+    App->>API: POST /api/v1/invitations/{token}/accept (dengan token sesi baru)
+    API-->>App: Reservation undangan valid untuk enrollment
+```
+
+Sesi login biasa di bawah ini tetap berlaku untuk karyawan yang tidak menerima undangan, atau yang sudah memakai kata sandi permanen:
 
 ```mermaid
 sequenceDiagram
@@ -714,8 +735,9 @@ Guard:
 
 - Create/revoke/resend hanya oleh HR (policy `hr.manage-employees`).
 - Accept hanya oleh employee pemilik undangan (object-level authorization: `employee_id` undangan harus sama dengan employee milik user yang login).
-- Accept mewajibkan sesi login (401 bila belum login; token undangan hanya mengizinkan face enrollment untuk employee yang sedang login — bukan kanal login). Error `FACE_ENROLLMENT_REQUIRED` dipakai untuk menolak presensi bila belum ada template aktif.
+- Accept mewajibkan sesi login (401 bila belum login). Token undangan bukan kanal login umum: ia hanya bisa menerbitkan sesi lewat endpoint pembuatan kata sandi, dan hanya selama akun masih memakai kata sandi sementara. Error `FACE_ENROLLMENT_REQUIRED` dipakai untuk menolak presensi bila belum ada template aktif.
 - Token: hash SHA-256 + pepper, perbandingan constant-time, one-time use.
+- `POST /invitations/{token}/password` bersifat publik (tanpa sesi) dan di-throttle 5 permintaan/menit. Endpoint ini menetapkan kata sandi permanen sekaligus menerbitkan sesi, tetapi **hanya** selama `users.must_change_password = true`; setelah itu token tidak bisa lagi menerbitkan sesi (409 `INVITATION_PASSWORD_ALREADY_CHANGED`).
 - Expiry default 3 hari (rentang API: 1–14); diproses scheduler (§4.10) **dan** dicek ulang saat accept agar race-safe.
 - Resend hanya untuk undangan `pending`/`sent`; undangan lama direvoke dan dibuat undangan baru (rotasi token).
 - Setiap perubahan status penting ditulis ke `audit_logs` (`invitation.created`, `invitation.resent`, `invitation.revoked`, `invitation.accepted`); event keamanan terkait masuk `security_events` (`invitation.accepted`).

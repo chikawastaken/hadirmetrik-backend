@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Modules\Identity\Http;
+namespace App\Shared\Http;
 
 use App\Modules\Employees\Contracts\Data\EmployeeSummary;
 use App\Modules\Identity\Contracts\Data\Account;

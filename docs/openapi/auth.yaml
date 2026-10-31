@@ -18,7 +18,7 @@ info:
 
     File ini adalah sumber kebenaran kontrak auth. Perubahan pada
     `routes/api/v1/auth.php` harus disertai pembaruan file ini.
-  version: 0.2.0
+  version: 0.3.0
 
 tags:
   - name: System
@@ -109,6 +109,96 @@ paths:
                 message: "Validasi gagal."
                 errors:
                   identifier: ["The identifier field is required when email is not present."]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/invitations/{token}/password:
+    post:
+      summary: Buat kata sandi dari link undangan
+      description: |
+        Dipakai karyawan yang menerima link undangan registrasi wajah. Link
+        undangan adalah kredensialnya: endpoint ini publik (tanpa sesi),
+        di-throttle 5 permintaan/menit, dan hanya berlaku selama undangan
+        berstatus `pending`/`sent` serta belum kedaluwarsa.
+
+        Endpoint ini menetapkan kata sandi permanen karyawan
+        (`must_change_password = false`) dan langsung menerbitkan sesi, sehingga
+        HR tidak perlu menyampaikan kata sandi sementara. Undangan tetap
+        `pending`: accept undangan adalah langkah terpisah.
+      tags: [Auth]
+      operationId: setPasswordFromInvitation
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9]{16,64}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetInvitationPasswordRequest'
+            example:
+              new_password: "rahasiaBaru123"
+              new_password_confirmation: "rahasiaBaru123"
+      responses:
+        '200':
+          description: Kata sandi dibuat dan sesi diterbitkan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSuccessResponse'
+              example:
+                success: true
+                message: "Kata sandi berhasil dibuat. Lanjutkan registrasi wajah."
+                data:
+                  token: "4|AbCdEf..."
+                  token_type: "Bearer"
+                  must_change_password: false
+                  user:
+                    id: 2
+                    name: "Karyawan Contoh"
+                    email: "karyawan@example.com"
+                    role: "employee"
+                    must_change_password: false
+                    employee_number: "HM-0251"
+                    employee: null
+        '404':
+          description: Token undangan tidak dikenal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Undangan tidak ditemukan."
+                errors:
+                  code: ["INVITATION_NOT_FOUND"]
+        '409':
+          description: Akun sudah memakai kata sandi permanen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Kata sandi akun ini sudah pernah diganti. Silakan masuk dengan kata sandi Anda."
+                errors:
+                  code: ["INVITATION_PASSWORD_ALREADY_CHANGED"]
+        '422':
+          description: Undangan tidak aktif/kedaluwarsa atau validasi gagal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Undangan sudah kedaluwarsa."
+                errors:
+                  invitation: ["Undangan sudah kedaluwarsa."]
+                  code: ["INVITATION_EXPIRED"]
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -407,6 +497,20 @@ components:
           type: string
           minLength: 8
           description: Minimal 8 karakter dan harus berbeda dari password saat ini.
+          example: "rahasiaBaru123"
+        new_password_confirmation:
+          type: string
+          description: Harus sama dengan `new_password`.
+          example: "rahasiaBaru123"
+
+    SetInvitationPasswordRequest:
+      type: object
+      required: [new_password, new_password_confirmation]
+      properties:
+        new_password:
+          type: string
+          minLength: 8
+          description: Kata sandi permanen baru, minimal 8 karakter.
           example: "rahasiaBaru123"
         new_password_confirmation:
           type: string

@@ -88,12 +88,15 @@ final class HrEmployeeController extends Controller
             'compensation' => $result->compensationData,
             'shift_assignment' => $result->shiftAssignmentData,
             'work_location_assignment' => $result->workLocationAssignmentData,
-            'initial_password' => $result->initialPassword,
             'must_change_password' => $result->mustChangePassword,
         ];
 
         if ($result->invitationData !== null) {
             $payload['invitation'] = $result->invitationData;
+        } else {
+            // Without an invitation the employee has no link to set a password
+            // from, so HR is the only way to hand over the temporary one.
+            $payload['initial_password'] = $result->initialPassword;
         }
 
         return ApiResponse::success($payload, null, 201);
