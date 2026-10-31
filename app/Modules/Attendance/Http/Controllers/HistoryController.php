@@ -6,16 +6,26 @@ class HistoryController extends Controller
 {
     public function index(Request $request): ApiResponse
     {
-        return ApiResponse::success([
-            ['date'=>'2026-10-30','clock_in'=>'07:52','clock_out'=>'17:05','status'=>'lulus'],
-            ['date'=>'2026-10-29','clock_in'=>'08:15','clock_out'=>'17:20','status'=>'terlambat'],
-        ]);
+        $user = $request->user();
+        $records = \App\Modules\Attendance\Infrastructure\Models\ClockRecord::where('user_id', $user?->id)
+            ->orderByDesc('date')
+            ->limit(30)
+            ->get();
+        return ApiResponse::success($records);
     }
+
     public function correct(Request $request, $id): ApiResponse
     {
-        return ApiResponse::success([
-            'corrected' => (int)$id,
+        $record = \App\Modules\Attendance\Infrastructure\Models\ClockRecord::find($id);
+        if (! $record) {
+            return ApiResponse::error('Record tidak ditemukan.', 404);
+        }
+        $record->update([
             'status' => 'pending_review',
+        ]);
+        return ApiResponse::success([
+            'corrected' => $record->id,
+            'status' => $record->status,
         ]);
     }
 }

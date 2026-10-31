@@ -6,11 +6,13 @@ class ScheduleController extends Controller
 {
     public function index(Request $request): ApiResponse
     {
+        $user = $request->user();
+        $shifts = \App\Modules\Employees\Infrastructure\Models\Shift::where('is_active', true)
+            ->select('id', 'name', 'start_time', 'end_time', 'effective_from')
+            ->get();
         return ApiResponse::success([
-            'shift_name' => 'Shift Pagi',
-            'start' => '08:00',
-            'end' => '17:00',
-            'days' => ['Senin','Selasa','Rabu','Kamis','Jumat'],
+            'shifts' => $shifts,
+            'user_id' => $user?->id,
         ]);
     }
 }
