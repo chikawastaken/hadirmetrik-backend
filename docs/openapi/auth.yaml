@@ -806,3 +806,4 @@ components:
         errors:
           type: [object, array, "null"]
           description: Detail validasi/kegagalan (opsional). Umumnya map field → daftar pesan.
+# Task 5: /me/profile GET/PATCH documented — updated 2026-10-31
