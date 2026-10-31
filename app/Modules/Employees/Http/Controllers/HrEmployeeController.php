@@ -5,10 +5,12 @@ namespace App\Modules\Employees\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Employees\Application\GetEmployeeDetail\GetEmployeeDetailUseCase;
 use App\Modules\Employees\Application\GetEmployeeOptions\GetEmployeeOptionsUseCase;
+use App\Modules\Employees\Application\Invitations\ResendInvitation;
 use App\Modules\Employees\Application\ResetEmployeePassword\ResetEmployeePasswordUseCase;
 use App\Modules\Employees\Contracts\Data\CreateEmployeeInput;
 use App\Modules\Employees\Contracts\EmployeeCreator;
 use App\Modules\Employees\Http\Requests\CreateEmployeeRequest;
+use App\Modules\Employees\Http\Requests\ResendInvitationRequest;
 use App\Shared\Http\ApiResponse;
 use Illuminate\Http\Request;
 
@@ -36,6 +38,25 @@ final class HrEmployeeController extends Controller
         return ApiResponse::success(
             $useCase->execute($id, $request->user()?->id),
             'Kata sandi sementara berhasil dibuat.',
+        );
+    }
+
+    public function resendInvitation(
+        int $id,
+        ResendInvitationRequest $request,
+        ResendInvitation $useCase,
+    ): ApiResponse {
+        return ApiResponse::success(
+            $useCase->execute(
+                employeeId: $id,
+                channels: $request->validated('channels'),
+                expiresInDays: $request->validated('expires_in_days') === null
+                    ? null
+                    : (int) $request->validated('expires_in_days'),
+                actorUserId: $request->user()?->id,
+            ),
+            'Undangan baru berhasil dibuat.',
+            201,
         );
     }
 

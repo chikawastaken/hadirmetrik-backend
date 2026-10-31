@@ -10,12 +10,25 @@ final class Sha256InvitationTokenGenerator implements InvitationTokenGenerator
     public function generate(): array
     {
         $plainToken = Str::random(32);
-        $pepper = (string) config('app.key', 'hadirmetrik-pepper-default');
-        $tokenHash = hash('sha256', $plainToken.$pepper);
 
         return [
             'plain_token' => $plainToken,
-            'token_hash' => $tokenHash,
+            'token_hash' => $this->hash($plainToken),
         ];
+    }
+
+    public function hash(string $plainToken): string
+    {
+        return hash('sha256', $plainToken.$this->pepper());
+    }
+
+    public function matches(string $plainToken, string $tokenHash): bool
+    {
+        return hash_equals($tokenHash, $this->hash($plainToken));
+    }
+
+    private function pepper(): string
+    {
+        return (string) config('app.key', 'hadirmetrik-pepper-default');
     }
 }

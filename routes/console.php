@@ -1,12 +1,14 @@
 <?php
 
 use App\Mail\RegistrationMail;
+use App\Modules\Employees\Application\Invitations\ExpireInvitations;
 use App\Modules\Identity\Contracts\AccountRepository;
 use App\Modules\Identity\Contracts\PasswordHasher;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -15,6 +17,16 @@ use Symfony\Component\Console\Command\Command;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Artisan::command('invitations:expire', function (ExpireInvitations $useCase) {
+    $expired = $useCase->execute();
+
+    $this->info("{$expired} undangan kedaluwarsa diproses.");
+
+    return Command::SUCCESS;
+})->purpose('Tandai undangan yang melewati expires_at sebagai expired');
+
+Schedule::command('invitations:expire')->everyTenMinutes()->withoutOverlapping();
 
 Artisan::command('email:verification-test {email}', function (
     string $email,
