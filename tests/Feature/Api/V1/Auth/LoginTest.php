@@ -116,6 +116,6 @@ class LoginTest extends TestCase
             'password' => 'rahasia123',
         ])
             ->assertStatus(403)
-            ->assertJsonPath('message', 'Your account has been suspended. Please contact HR.');
+            ->assertJsonPath('message', 'Akun Anda dinonaktifkan. Silakan hubungi HR.');
     }
 }

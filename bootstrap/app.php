@@ -51,7 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $exceptions->render(function (AuthenticationException $e, Request $request) use ($isApi) {
             return $isApi($request)
-                ? ApiResponse::error('Unauthenticated.', 401)
+                ? ApiResponse::error('Tidak terautentikasi.', 401)
                 : null;
         });
 
@@ -63,13 +63,13 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $exceptions->render(function (ThrottleRequestsException $e, Request $request) use ($isApi) {
             return $isApi($request)
-                ? ApiResponse::error('Too Many Attempts.', 429)
+                ? ApiResponse::error('Terlalu banyak percobaan. Silakan coba lagi nanti.', 429)
                 : null;
         });
 
         $exceptions->render(function (ModelNotFoundException|NotFoundHttpException $e, Request $request) use ($isApi) {
             return $isApi($request)
-                ? ApiResponse::error('Resource tidak ditemukan.', 404)
+                ? ApiResponse::error('Data tidak ditemukan.', 404)
                 : null;
         });
 

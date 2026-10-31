@@ -19,7 +19,7 @@ class ClockController extends Controller
             ->whereNotNull('clock_in')
             ->first();
         if ($existing) {
-            return ApiResponse::error('Clock-in sudah tercatat hari ini.', 422);
+            return ApiResponse::error('Absen masuk sudah tercatat hari ini.', 422);
         }
         $record = \App\Modules\Attendance\Infrastructure\Models\ClockRecord::create([
             'user_id' => $user->id,
@@ -44,7 +44,7 @@ class ClockController extends Controller
             ->whereNull('clock_out')
             ->first();
         if (! $record) {
-            return ApiResponse::error('Tidak ada clock-in aktif hari ini.', 422);
+            return ApiResponse::error('Belum ada absen masuk hari ini.', 422);
         }
         $record->update([
             'clock_out' => now(),

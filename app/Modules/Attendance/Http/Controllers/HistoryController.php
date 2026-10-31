@@ -18,7 +18,7 @@ class HistoryController extends Controller
     {
         $record = \App\Modules\Attendance\Infrastructure\Models\ClockRecord::find($id);
         if (! $record) {
-            return ApiResponse::error('Record tidak ditemukan.', 404);
+            return ApiResponse::error('Data presensi tidak ditemukan.', 404);
         }
         $record->update([
             'status' => 'pending_review',

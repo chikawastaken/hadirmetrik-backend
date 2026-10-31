@@ -186,8 +186,8 @@ class CreateEmployeeTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('success', false)
-            ->assertJsonPath('message', 'Selected division is not found or inactive.')
-            ->assertJsonPath('errors.division_id.0', 'Selected division is not found or inactive.');
+            ->assertJsonPath('message', 'Divisi yang dipilih tidak ditemukan atau tidak aktif.')
+            ->assertJsonPath('errors.division_id.0', 'Divisi yang dipilih tidak ditemukan atau tidak aktif.');
     }
 
     public function test_employee_created_without_invitation_returns_the_temporary_password(): void

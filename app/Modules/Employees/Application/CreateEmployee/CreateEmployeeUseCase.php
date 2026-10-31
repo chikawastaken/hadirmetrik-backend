@@ -36,24 +36,24 @@ final class CreateEmployeeUseCase implements EmployeeCreator
         // 1. Validation checks
         $division = Division::query()->find($input->divisionId);
         if (! $division || ! $division->is_active) {
-            throw new EmployeeCreationFailed('division_id', 'Selected division is not found or inactive.');
+            throw new EmployeeCreationFailed('division_id', 'Divisi yang dipilih tidak ditemukan atau tidak aktif.');
         }
 
         $shift = Shift::query()->find($input->shiftId);
         if (! $shift || ! $shift->is_active) {
-            throw new EmployeeCreationFailed('shift_id', 'Selected shift is not found or inactive.');
+            throw new EmployeeCreationFailed('shift_id', 'Shift yang dipilih tidak ditemukan atau tidak aktif.');
         }
 
         $location = WorkLocation::query()->find($input->workLocationId);
         if (! $location || ! $location->is_active) {
-            throw new EmployeeCreationFailed('work_location_id', 'Selected work location is not found or inactive.');
+            throw new EmployeeCreationFailed('work_location_id', 'Lokasi kerja yang dipilih tidak ditemukan atau tidak aktif.');
         }
 
         $manager = null;
         if ($input->managerId !== null) {
             $manager = Employee::query()->find($input->managerId);
             if (! $manager || $manager->employment_status === 'terminated') {
-                throw new EmployeeCreationFailed('manager_id', 'Selected manager is not found or inactive.');
+                throw new EmployeeCreationFailed('manager_id', 'Atasan yang dipilih tidak ditemukan atau tidak aktif.');
             }
         }
 
@@ -73,7 +73,7 @@ final class CreateEmployeeUseCase implements EmployeeCreator
         }
 
         if ($input->sendInvitation && in_array('whatsapp', $input->invitationChannels, true) && empty($phoneE164)) {
-            throw new EmployeeCreationFailed('phone', 'Phone number is required when WhatsApp channel is selected.');
+            throw new EmployeeCreationFailed('phone', 'Nomor telepon wajib diisi jika kanal WhatsApp dipilih.');
         }
 
         $initialPassword = $this->passwordGenerator->generate(16);

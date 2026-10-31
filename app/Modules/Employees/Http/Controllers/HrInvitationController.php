@@ -16,7 +16,7 @@ final class HrInvitationController extends Controller
     ): ApiResponse {
         return ApiResponse::success(
             $useCase->execute($id, $request->user()?->id),
-            'Undangan berhasil direvoke.',
+            'Undangan berhasil dicabut.',
         );
     }
 }
