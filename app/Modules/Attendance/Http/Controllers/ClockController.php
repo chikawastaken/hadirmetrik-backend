@@ -56,4 +56,19 @@ class ClockController extends Controller
             'status' => $record->status,
         ]);
     }
+
+    public function index(Request $request): ApiResponse
+    {
+        $user = $request->user();
+        $records = \App\Modules\Attendance\Infrastructure\Models\ClockRecord::where('user_id', $user?->id)
+            ->orderByDesc('date')
+            ->limit(30)
+            ->get();
+        return ApiResponse::success($records->map(fn($r) => [
+            'date' => $r->date,
+            'clock_in' => $r->clock_in?->toIso8601String(),
+            'clock_out' => $r->clock_out?->toIso8601String(),
+            'status' => $r->status,
+        ]));
+    }
 }

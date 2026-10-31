@@ -8,6 +8,7 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
     Route::patch('/me/profile', [\App\Modules\Employees\Http\Controllers\EmployeeProfileController::class, 'update']);
 
     // Phase 3 — Presensi Inti
+    Route::get('/clock', [\App\Modules\Attendance\Http\Controllers\ClockController::class, 'index']);
     Route::post('/clock-in', [\App\Modules\Attendance\Http\Controllers\ClockController::class, 'in']);
     Route::post('/clock-out', [\App\Modules\Attendance\Http\Controllers\ClockController::class, 'out']);
     Route::get('/schedule', [\App\Modules\Attendance\Http\Controllers\ScheduleController::class, 'index']);
