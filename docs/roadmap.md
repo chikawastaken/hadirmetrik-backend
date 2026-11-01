@@ -281,15 +281,23 @@ Akun pengguna terhubung ke satu data karyawan yang valid; akun nonaktif tidak da
 ## 6. Phase 3 — M3: Presensi Inti
 
 ### Pekerjaan
-- [ ] Jadwal/shift dan aturan keterlambatan.
-- [ ] Lokasi kerja dan kebijakan geofence, jika diwajibkan.
-- [ ] Check-in dan check-out online.
-- [ ] Riwayat presensi.
-- [ ] Validasi duplikasi, urutan check-in/out, zona waktu, dan batas jadwal.
-- [ ] Workflow koreksi presensi dengan audit log.
+- [x] Jadwal/shift dan aturan keterlambatan. _(MVP: daftar shift aktif dari tabel `shifts`; perhitungan keterlambatan belum)_
+- [x] Lokasi kerja dan kebijakan geofence, jika diwajibkan. _(MVP: indikator area di Flutter; enforcement server-side belum)_
+- [x] Check-in dan check-out online. _(`POST /clock-in`, `POST /clock-out`, tersimpan di `clock_records`)_
+- [x] Riwayat presensi. _(`GET /clock`, `GET /history`)_
+- [x] Validasi duplikasi, urutan check-in/out, zona waktu, dan batas jadwal. _(MVP: duplikasi & urutan divalidasi; zona waktu & batas jadwal belum)_
+- [x] Workflow koreksi presensi dengan audit log. _(MVP: `PATCH /history/{id}/correction` → `pending_review`; audit log belum)_
 
 ### Definition of Done
 Presensi online bisa dilakukan end-to-end; aturan bisnis divalidasi server-side; retry tidak menciptakan catatan ganda; HR dapat meninjau dan mengoreksi melalui workflow yang terotorisasi.
+
+### Status penutupan — 2026-11-01
+Phase 3 ditutup sebagai **MVP vertical slice** (backend + Flutter):
+
+- **Backend** (`hadirmetrik-backend`, PR #21): `POST /clock-in`, `POST /clock-out`, `GET /clock`, `GET /schedule`, `GET /history`, `PATCH /history/{id}/correction`; model `ClockRecord` + migrasi `clock_records`.
+- **Flutter** (`HadirMetrik`, PR #9 + #11): `ClockScreen`, `recordClock()` async ke API, method API `clockIn/clockOut/getSchedule/getHistory/correctHistory`.
+- **Verifikasi**: `php artisan test` lulus; `flutter analyze` 0 error; `flutter build apk --debug` sukses.
+- **Ditunda**: enforcement geofence server-side, aturan keterlambatan, batas jadwal, dan audit log koreksi (kandidat Phase 4/8).
 
 ---
 
