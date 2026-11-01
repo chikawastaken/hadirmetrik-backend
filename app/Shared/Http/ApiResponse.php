@@ -18,12 +18,27 @@ class ApiResponse extends JsonResource
         mixed $resource,
         private readonly int $statusCode = 200,
         private readonly ?string $message = null,
+        private readonly bool $isError = false,
+        private readonly mixed $errors = null,
     ) {
         parent::__construct($resource);
     }
 
     public function toArray(Request $request): array
     {
+        if ($this->isError) {
+            $payload = [
+                'success' => false,
+                'message' => $this->message ?? 'Terjadi kesalahan.',
+            ];
+
+            if ($this->errors !== null) {
+                $payload['errors'] = $this->errors;
+            }
+
+            return $payload;
+        }
+
         $payload = [
             'success' => true,
             'data' => $this->resource,
@@ -49,17 +64,12 @@ class ApiResponse extends JsonResource
         return new self($data, $status, $message);
     }
 
-    public static function error(string $message, int $status = 422, mixed $errors = null): JsonResponse
+    /**
+     * Return an error envelope as the same type as success responses so
+     * controller methods can declare a single `ApiResponse` return type.
+     */
+    public static function error(string $message, int $status = 422, mixed $errors = null): self
     {
-        $payload = [
-            'success' => false,
-            'message' => $message,
-        ];
-
-        if ($errors !== null) {
-            $payload['errors'] = $errors;
-        }
-
-        return response()->json($payload, $status);
+        return new self(null, $status, $message, true, $errors);
     }
 }
