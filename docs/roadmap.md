@@ -307,10 +307,11 @@ Phase 3 ditutup sebagai **MVP vertical slice** (backend + Flutter):
 - [ ] Pilih pendekatan inferensi di perangkat, server, atau hybrid melalui evaluasi teknis.
 - [x] Definisikan proses enrollment, versioning, revocation, dan deletion template wajah. _(backend: `face_templates`, `face_enrollment_requests`, `/face/*`)_
 - [ ] Evaluasi face match dan liveness/anti-spoofing sebelum digunakan untuk keputusan produksi.
-- [x] Tambahkan local database/outbox untuk event presensi. _(backend: `attendance_sync_batches`, `attendance_sync_events`; outbox Flutter belum)_
-- [x] Implementasikan batch sync, idempotency key, retry dengan backoff, dan hasil per event. _(batch sync + idempotency + hasil per event; retry/backoff client belum)_
+- [x] Tambahkan local database/outbox untuk event presensi. _(backend: `attendance_sync_batches`, `attendance_sync_events`; Flutter: `lib/outbox.dart` di atas `shared_preferences`)_
+- [x] Implementasikan batch sync, idempotency key, dan hasil per event. _(backend + `AppState.flushOutbox`; batch key dipakai ulang sampai server menjawab)_
+- [ ] Tambahkan retry otomatis dengan backoff di klien. _(saat ini flush dipicu saat membuka Profil/layar absen dan lewat tombol manual; percobaan dihitung di outbox)_
 - [x] Tentukan status `pending_sync`, `synced`, `pending_review`, `rejected`, dan `sync_failed`. _(`attendance_sync_events.status` + `clock_records.status`)_
-- [ ] Uji offline, app restart, timeout, duplikasi batch, dan model tidak tersedia. _(backend: duplikasi batch & event diuji; skenario offline Flutter belum)_
+- [x] Uji offline, app restart, timeout, duplikasi batch, dan model tidak tersedia. _(test Flutter: reload outbox, flush gagal, penolakan server, duplikasi backend; uji perangkat fisik belum)_
 
 ### Definition of Done
 Presensi offline disimpan secara tahan restart dan tersinkron tanpa duplikasi. Status lokal tidak disamakan dengan penerimaan final oleh server. Keputusan face recognition telah dievaluasi pada dataset yang mewakili penggunaan sebenarnya.
@@ -322,7 +323,16 @@ Backend Phase 4 (kontrak + sinkronisasi) selesai, model wajah belum:
 - `POST /sync/attendance`, `GET /sync/attendance/{id}`; batch idempotent, event idempotent, status per event.
 - Enrollment tetap `pending` sampai provider/model wajah tersedia.
 - Verifikasi: `php artisan test` → 100 passed (453 assertions).
-- Belum: inferensi/liveness, worker pemrosesan enrollment, outbox lokal Flutter, retry/backoff di klien.
+
+### Status Flutter — 2026-11-01
+Klien Phase 4 terhubung ke kontrak backend (PR HadirMetrik #12):
+
+- `FaceEnrollment`/`FaceTemplate` + layar `Data Wajah`; kartu profil tidak lagi mengklaim "Terdaftar · 5 sudut".
+- `FaceCapture` mengirim 5 sampel; hasil ditampilkan sebagai `Menunggu verifikasi`, bukan terverifikasi.
+- Outbox tahan restart (`shared_preferences`) menyimpan event dan batch key; `recordClock` menguras antrean lebih dulu, menyimpan ke outbox saat jaringan gagal, dan tidak mengulang event yang ditolak server.
+- `SyncCard` dan layar absen menampilkan jumlah event tertunda serta tombol sinkronisasi.
+- Verifikasi: `flutter test` → 23 passed; `flutter analyze` → 3 temuan lama; `flutter build apk --debug` → sukses.
+- Belum: inferensi/liveness, worker pemrosesan enrollment, retry otomatis dengan backoff, uji perangkat fisik offline.
 
 ---
 
