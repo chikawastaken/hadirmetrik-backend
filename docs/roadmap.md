@@ -305,15 +305,24 @@ Phase 3 ditutup sebagai **MVP vertical slice** (backend + Flutter):
 
 ### Pekerjaan
 - [ ] Pilih pendekatan inferensi di perangkat, server, atau hybrid melalui evaluasi teknis.
-- [ ] Definisikan proses enrollment, versioning, revocation, dan deletion template wajah.
+- [x] Definisikan proses enrollment, versioning, revocation, dan deletion template wajah. _(backend: `face_templates`, `face_enrollment_requests`, `/face/*`)_
 - [ ] Evaluasi face match dan liveness/anti-spoofing sebelum digunakan untuk keputusan produksi.
-- [ ] Tambahkan local database/outbox untuk event presensi.
-- [ ] Implementasikan batch sync, idempotency key, retry dengan backoff, dan hasil per event.
-- [ ] Tentukan status `pending_sync`, `synced`, `pending_review`, `rejected`, dan `sync_failed`.
-- [ ] Uji offline, app restart, timeout, duplikasi batch, dan model tidak tersedia.
+- [x] Tambahkan local database/outbox untuk event presensi. _(backend: `attendance_sync_batches`, `attendance_sync_events`; outbox Flutter belum)_
+- [x] Implementasikan batch sync, idempotency key, retry dengan backoff, dan hasil per event. _(batch sync + idempotency + hasil per event; retry/backoff client belum)_
+- [x] Tentukan status `pending_sync`, `synced`, `pending_review`, `rejected`, dan `sync_failed`. _(`attendance_sync_events.status` + `clock_records.status`)_
+- [ ] Uji offline, app restart, timeout, duplikasi batch, dan model tidak tersedia. _(backend: duplikasi batch & event diuji; skenario offline Flutter belum)_
 
 ### Definition of Done
 Presensi offline disimpan secara tahan restart dan tersinkron tanpa duplikasi. Status lokal tidak disamakan dengan penerimaan final oleh server. Keputusan face recognition telah dievaluasi pada dataset yang mewakili penggunaan sebenarnya.
+
+### Status backend — 2026-11-01
+Backend Phase 4 (kontrak + sinkronisasi) selesai, model wajah belum:
+
+- `POST /face/enroll`, `GET /face/enrollments/{id}`, `GET /face/templates`, `POST /face/templates/{id}/revoke`, `DELETE /face/templates/{id}`.
+- `POST /sync/attendance`, `GET /sync/attendance/{id}`; batch idempotent, event idempotent, status per event.
+- Enrollment tetap `pending` sampai provider/model wajah tersedia.
+- Verifikasi: `php artisan test` → 100 passed (453 assertions).
+- Belum: inferensi/liveness, worker pemrosesan enrollment, outbox lokal Flutter, retry/backoff di klien.
 
 ---
 

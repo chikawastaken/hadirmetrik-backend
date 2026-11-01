@@ -14,4 +14,14 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
     Route::get('/schedule', [\App\Modules\Attendance\Http\Controllers\ScheduleController::class, 'index']);
     Route::get('/history', [\App\Modules\Attendance\Http\Controllers\ClockController::class, 'index']);
     Route::patch('/history/{id}/correction', [\App\Modules\Attendance\Http\Controllers\HistoryController::class, 'correct']);
+
+    // Phase 4 — Verifikasi Wajah & Offline Sync
+    Route::post('/face/enroll', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'store']);
+    Route::get('/face/enrollments/{id}', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'status']);
+    Route::get('/face/templates', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'index']);
+    Route::post('/face/templates/{id}/revoke', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'revoke']);
+    Route::delete('/face/templates/{id}', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'destroy']);
+
+    Route::post('/sync/attendance', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'store']);
+    Route::get('/sync/attendance/{id}', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'show']);
 });
