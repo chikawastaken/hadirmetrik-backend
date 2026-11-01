@@ -21,4 +21,7 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
     Route::get('/face/templates', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'index']);
     Route::post('/face/templates/{id}/revoke', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'revoke']);
     Route::delete('/face/templates/{id}', [\App\Modules\Attendance\Http\Controllers\FaceEnrollmentController::class, 'destroy']);
+
+    Route::post('/sync/attendance', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'store']);
+    Route::get('/sync/attendance/{id}', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'show']);
 });
