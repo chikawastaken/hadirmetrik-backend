@@ -1,6 +1,7 @@
 <?php
 namespace App\Modules\Attendance\Http\Controllers;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Shared\Http\ApiResponse;
 
