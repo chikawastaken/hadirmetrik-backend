@@ -9,7 +9,7 @@ class ScheduleController extends Controller
     {
         $user = $request->user();
         $shifts = \App\Modules\Employees\Infrastructure\Models\Shift::where('is_active', true)
-            ->select('id', 'name', 'start_time', 'end_time', 'effective_from')
+            ->select('id', 'name', 'start_time', 'end_time')
             ->get();
         return ApiResponse::success([
             'shifts' => $shifts,
