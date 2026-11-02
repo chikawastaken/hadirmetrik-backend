@@ -322,7 +322,7 @@ Backend Phase 4 (kontrak + sinkronisasi) selesai, model wajah belum:
 - `POST /face/enroll`, `GET /face/enrollments/{id}`, `GET /face/templates`, `POST /face/templates/{id}/revoke`, `DELETE /face/templates/{id}`.
 - `POST /sync/attendance`, `GET /sync/attendance/{id}`; batch idempotent, event idempotent, status per event.
 - Enrollment tetap `pending` sampai provider/model wajah tersedia.
-- Verifikasi: `php artisan test` → 100 passed (453 assertions).
+- Verifikasi: `php artisan test` → 101 passed (456 assertions), termasuk run langsung terhadap PostgreSQL 17 di Docker.
 
 ### Status Flutter — 2026-11-01
 Klien Phase 4 terhubung ke kontrak backend (PR HadirMetrik #12, ditinjau ulang di #13):
