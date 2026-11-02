@@ -87,6 +87,22 @@ class ClockTest extends TestCase
             ->assertJsonPath('success', true);
     }
 
+    public function test_schedule_returns_active_shifts(): void
+    {
+        $user = $this->makeEmployeeUser();
+        \App\Modules\Employees\Infrastructure\Models\Shift::create([
+            'name' => 'Shift Pagi',
+            'start_time' => '08:00:00',
+            'end_time' => '17:00:00',
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/v1/schedule')
+            ->assertOk()
+            ->assertJsonPath('data.shifts.0.name', 'Shift Pagi')
+            ->assertJsonPath('data.shifts.0.start_time', '08:00:00');
+    }
+
     public function test_clock_routes_require_auth(): void
     {
         $this->postJson('/api/v1/clock-in')->assertStatus(401);
