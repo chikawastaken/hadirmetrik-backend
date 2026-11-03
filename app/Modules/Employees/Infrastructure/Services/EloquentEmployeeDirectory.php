@@ -28,6 +28,21 @@ final class EloquentEmployeeDirectory implements EmployeeDirectory
         return $employee === null ? null : $this->toSummary($employee);
     }
 
+    public function findActiveByIds(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        return Employee::query()
+            ->with('division')
+            ->whereIn('id', $ids)
+            ->where('employment_status', '!=', 'terminated')
+            ->get()
+            ->map(fn (Employee $employee): EmployeeSummary => $this->toSummary($employee))
+            ->all();
+    }
+
     private function toSummary(Employee $employee): EmployeeSummary
     {
         return new EmployeeSummary(

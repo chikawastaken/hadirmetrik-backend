@@ -2,6 +2,7 @@
 
 use App\Modules\Employees\Http\Controllers\HrEmployeeController;
 use App\Modules\Employees\Http\Controllers\HrInvitationController;
+use App\Modules\Tasks\Http\Controllers\HrTaskController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth:sanctum', 'password.changed', 'hr.role'])->prefix('hr')->group(function (): void {
@@ -11,4 +12,8 @@ Route::middleware(['auth:sanctum', 'password.changed', 'hr.role'])->prefix('hr')
     Route::post('employees/{id}/reset-password', [HrEmployeeController::class, 'resetPassword'])->whereNumber('id');
     Route::post('employees', [HrEmployeeController::class, 'store']);
     Route::delete('invitations/{id}', [HrInvitationController::class, 'destroy'])->whereNumber('id');
+
+    Route::get('tasks', [HrTaskController::class, 'index']);
+    Route::get('tasks/options', [HrTaskController::class, 'options']);
+    Route::post('tasks', [HrTaskController::class, 'store']);
 });
