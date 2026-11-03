@@ -28,4 +28,6 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
     // Phase 5 — Manajemen Tugas
     Route::get('/tasks', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'index']);
     Route::get('/tasks/{id}', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'show'])->whereNumber('id');
+    Route::post('/tasks/{id}/start', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'start'])->whereNumber('id');
+    Route::patch('/tasks/{id}/progress', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'progress'])->whereNumber('id');
 });

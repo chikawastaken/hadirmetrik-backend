@@ -3,7 +3,10 @@
 namespace App\Modules\Tasks\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Tasks\Application\Exceptions\TaskNotFound;
+use App\Modules\Tasks\Application\StartTask\StartTaskUseCase;
 use App\Modules\Tasks\Application\Support\TaskAccess;
+use App\Modules\Tasks\Application\UpdateProgress\UpdateProgressUseCase;
 use App\Modules\Tasks\Http\Presenters\TaskPresenter;
 use App\Modules\Tasks\Infrastructure\Models\Task;
 use App\Modules\Tasks\Infrastructure\Models\TaskAssignment;
@@ -54,5 +57,42 @@ final class TaskController extends Controller
         }
 
         return ApiResponse::success(['task' => $this->presenter->detail($task)]);
+    }
+
+    public function start(Request $request, int $id, StartTaskUseCase $useCase): ApiResponse
+    {
+        $task = $useCase->execute($id, $this->currentEmployeeId($request));
+
+        return ApiResponse::success(['task' => $this->presenter->detail($task)], 'Tugas dimulai.');
+    }
+
+    public function progress(Request $request, int $id, UpdateProgressUseCase $useCase): ApiResponse
+    {
+        $validated = $request->validate([
+            'progress_percent' => ['required', 'integer'],
+            'checklist' => ['nullable', 'array'],
+        ]);
+
+        $task = $useCase->execute(
+            $id,
+            $this->currentEmployeeId($request),
+            (int) $validated['progress_percent'],
+            $validated['checklist'] ?? [],
+        );
+
+        return ApiResponse::success(['task' => $this->presenter->detail($task)], 'Progres tugas diperbarui.');
+    }
+
+    private function currentEmployeeId(Request $request): int
+    {
+        $employeeId = $this->access->employeeIdFor(
+            (int) $request->user()->getAuthIdentifier()
+        );
+
+        if ($employeeId === null) {
+            throw new TaskNotFound;
+        }
+
+        return $employeeId;
     }
 }
