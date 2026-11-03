@@ -32,4 +32,5 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
     Route::patch('/tasks/{id}/progress', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'progress'])->whereNumber('id');
     Route::post('/tasks/{id}/submissions', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'submit'])->whereNumber('id');
     Route::post('/tasks/{id}/comments', [\App\Modules\Tasks\Http\Controllers\TaskCommentController::class, 'store'])->whereNumber('id');
+    Route::post('/tasks/{id}/attachments', [\App\Modules\Tasks\Http\Controllers\TaskAttachmentController::class, 'store'])->whereNumber('id');
 });
