@@ -5,6 +5,7 @@ namespace App\Modules\Tasks\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Tasks\Application\Exceptions\TaskNotFound;
 use App\Modules\Tasks\Application\StartTask\StartTaskUseCase;
+use App\Modules\Tasks\Application\SubmitTask\SubmitTaskUseCase;
 use App\Modules\Tasks\Application\Support\TaskAccess;
 use App\Modules\Tasks\Application\UpdateProgress\UpdateProgressUseCase;
 use App\Modules\Tasks\Http\Presenters\TaskPresenter;
@@ -81,6 +82,30 @@ final class TaskController extends Controller
         );
 
         return ApiResponse::success(['task' => $this->presenter->detail($task)], 'Progres tugas diperbarui.');
+    }
+
+    public function submit(Request $request, int $id, SubmitTaskUseCase $useCase): ApiResponse
+    {
+        $validated = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+            'checklist' => ['nullable', 'array'],
+            'attachment_ids' => ['nullable', 'array'],
+            'attachment_ids.*' => ['integer'],
+            'evidence' => ['nullable', 'array'],
+            'evidence.*' => ['file', 'mimes:jpg,jpeg,png,pdf,docx,xlsx', 'max:10240'],
+        ]);
+
+        $task = $useCase->execute(
+            $id,
+            $this->currentEmployeeId($request),
+            $validated['note'] ?? null,
+            $validated['checklist'] ?? [],
+            $request->file('evidence') ?? [],
+            $validated['attachment_ids'] ?? [],
+            (int) $request->user()->getAuthIdentifier(),
+        );
+
+        return ApiResponse::success(['task' => $this->presenter->detail($task)], 'Tugas diajukan untuk penilaian.', 201);
     }
 
     private function currentEmployeeId(Request $request): int
