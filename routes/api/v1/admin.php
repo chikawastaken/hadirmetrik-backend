@@ -17,5 +17,6 @@ Route::middleware(['auth:sanctum', 'password.changed', 'hr.role'])->prefix('hr')
     Route::get('tasks', [HrTaskController::class, 'index']);
     Route::get('tasks/options', [HrTaskController::class, 'options']);
     Route::post('tasks', [HrTaskController::class, 'store']);
+    Route::post('tasks/{id}/cancel', [HrTaskController::class, 'cancel'])->whereNumber('id');
     Route::post('task-submissions/{id}/review', [HrTaskSubmissionController::class, 'review'])->whereNumber('id');
 });

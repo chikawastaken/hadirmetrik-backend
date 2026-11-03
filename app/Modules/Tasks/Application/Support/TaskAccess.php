@@ -44,6 +44,11 @@ final class TaskAccess
         return $this->isHr($role) || (int) $task->created_by === $userId;
     }
 
+    public function canCancel(int $userId, string $role, Task $task): bool
+    {
+        return $role === 'admin' || (int) $task->created_by === $userId;
+    }
+
     public function isHr(string $role): bool
     {
         return in_array($role, ['hr', 'admin'], true);

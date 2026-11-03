@@ -4,9 +4,14 @@ namespace App\Modules\Tasks\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Employees\Contracts\EmployeeDirectory;
+use App\Modules\Tasks\Application\Exceptions\TaskForbidden;
+use App\Modules\Tasks\Application\Exceptions\TaskNotFound;
+use App\Modules\Tasks\Application\Exceptions\TaskStateConflict;
+use App\Modules\Tasks\Application\Support\TaskAccess;
 use App\Modules\Tasks\Http\Presenters\TaskPresenter;
 use App\Modules\Tasks\Http\Requests\StoreTaskRequest;
 use App\Modules\Tasks\Infrastructure\Models\Task;
+use App\Modules\Tasks\Infrastructure\Models\TaskAssignment;
 use App\Shared\Http\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +22,7 @@ final class HrTaskController extends Controller
     public function __construct(
         private readonly EmployeeDirectory $employees,
         private readonly TaskPresenter $presenter,
+        private readonly TaskAccess $access,
     ) {}
 
     public function index(Request $request): ApiResponse
@@ -86,6 +92,49 @@ final class HrTaskController extends Controller
             ['task' => $this->presenter->detail($task->fresh())],
             'Tugas berhasil dibuat.',
             201,
+        );
+    }
+
+    public function cancel(Request $request, int $id): ApiResponse
+    {
+        $task = Task::query()->find($id);
+
+        if ($task === null) {
+            throw new TaskNotFound;
+        }
+
+        $user = $request->user();
+
+        if (! $this->access->canCancel(
+            (int) $user->getAuthIdentifier(),
+            (string) $user->role,
+            $task,
+        )) {
+            throw new TaskForbidden('Anda tidak berwenang membatalkan tugas ini.');
+        }
+
+        if (! in_array($task->status, [Task::STATUS_DRAFT, Task::STATUS_ASSIGNED], true)) {
+            throw new TaskStateConflict('Tugas yang sudah selesai atau dibatalkan tidak dapat dibatalkan.');
+        }
+
+        DB::transaction(function () use ($task): void {
+            $task->update([
+                'status' => Task::STATUS_CANCELLED,
+                'cancelled_at' => now(),
+            ]);
+
+            TaskAssignment::query()
+                ->where('task_id', $task->id)
+                ->whereNotIn('status', [
+                    TaskAssignment::STATUS_COMPLETED,
+                    TaskAssignment::STATUS_CANCELLED,
+                ])
+                ->update(['status' => TaskAssignment::STATUS_CANCELLED]);
+        });
+
+        return ApiResponse::success(
+            ['task' => $this->presenter->detail($task->fresh())],
+            'Tugas dibatalkan.',
         );
     }
 }
