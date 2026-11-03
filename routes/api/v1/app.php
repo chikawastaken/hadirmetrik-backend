@@ -24,4 +24,8 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
 
     Route::post('/sync/attendance', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'store']);
     Route::get('/sync/attendance/{id}', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'show']);
+
+    // Phase 5 — Manajemen Tugas
+    Route::get('/tasks', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'index']);
+    Route::get('/tasks/{id}', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'show'])->whereNumber('id');
 });
