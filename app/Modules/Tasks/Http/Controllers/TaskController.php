@@ -1,0 +1,143 @@
+<?php
+
+namespace App\Modules\Tasks\Http\Controllers;
+
+use App\Http\Controllers\Controller;
+use App\Modules\Tasks\Application\Exceptions\TaskNotFound;
+use App\Modules\Tasks\Application\StartTask\StartTaskUseCase;
+use App\Modules\Tasks\Application\SubmitTask\SubmitTaskUseCase;
+use App\Modules\Tasks\Application\Support\TaskAccess;
+use App\Modules\Tasks\Application\UpdateProgress\UpdateProgressUseCase;
+use App\Modules\Tasks\Http\Presenters\TaskPresenter;
+use App\Modules\Tasks\Infrastructure\Models\Task;
+use App\Modules\Tasks\Infrastructure\Models\TaskAssignment;
+use App\Modules\Tasks\Infrastructure\Models\TaskSubmission;
+use App\Shared\Http\ApiResponse;
+use Illuminate\Http\Request;
+
+final class TaskController extends Controller
+{
+    public function __construct(
+        private readonly TaskAccess $access,
+        private readonly TaskPresenter $presenter,
+    ) {}
+
+    public function index(Request $request): ApiResponse
+    {
+        $user = $request->user();
+        $employeeId = $this->access->employeeIdFor((int) $user->getAuthIdentifier());
+
+        if ($employeeId === null) {
+            return ApiResponse::success(['tasks' => []]);
+        }
+
+        $assignments = TaskAssignment::query()
+            ->with('task')
+            ->where('employee_id', $employeeId)
+            ->latest()
+            ->get();
+
+        return ApiResponse::success([
+            'tasks' => $assignments->map(fn (TaskAssignment $assignment): array => [
+                'assignment' => $this->presenter->assignment($assignment),
+                'task' => $this->presenter->summary($assignment->task),
+            ])->values()->all(),
+        ]);
+    }
+
+    public function show(Request $request, int $id): ApiResponse
+    {
+        $task = Task::query()->find($id);
+        $user = $request->user();
+        $userId = (int) $user->getAuthIdentifier();
+
+        if ($task === null || ! $this->access->canView(
+            $userId,
+            (string) $user->role,
+            $task,
+        )) {
+            return ApiResponse::error('Tugas tidak ditemukan.', 404);
+        }
+
+        $viewerEmployeeId = $user->role === 'employee'
+            ? $this->access->employeeIdFor($userId)
+            : null;
+
+        return ApiResponse::success([
+            'task' => $this->presenter->detail($task, $viewerEmployeeId),
+        ]);
+    }
+
+    public function start(Request $request, int $id, StartTaskUseCase $useCase): ApiResponse
+    {
+        $task = $useCase->execute($id, $this->currentEmployeeId($request));
+
+        return ApiResponse::success(['task' => $this->presenter->detail($task)], 'Tugas dimulai.');
+    }
+
+    public function progress(Request $request, int $id, UpdateProgressUseCase $useCase): ApiResponse
+    {
+        $validated = $request->validate([
+            'progress_percent' => ['required', 'integer'],
+            'checklist' => ['nullable', 'array'],
+        ]);
+
+        $task = $useCase->execute(
+            $id,
+            $this->currentEmployeeId($request),
+            (int) $validated['progress_percent'],
+            $validated['checklist'] ?? [],
+        );
+
+        return ApiResponse::success(['task' => $this->presenter->detail($task)], 'Progres tugas diperbarui.');
+    }
+
+    public function submit(Request $request, int $id, SubmitTaskUseCase $useCase): ApiResponse
+    {
+        $validated = $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+            'checklist' => ['nullable', 'array'],
+            'attachment_ids' => ['nullable', 'array'],
+            'attachment_ids.*' => ['integer'],
+            'evidence' => ['nullable', 'array'],
+            'evidence.*' => ['file', 'mimes:jpg,jpeg,png,pdf,docx,xlsx', 'max:10240'],
+        ]);
+
+        $employeeId = $this->currentEmployeeId($request);
+
+        $task = $useCase->execute(
+            $id,
+            $employeeId,
+            $validated['note'] ?? null,
+            $validated['checklist'] ?? [],
+            $request->file('evidence') ?? [],
+            $validated['attachment_ids'] ?? [],
+            (int) $request->user()->getAuthIdentifier(),
+        );
+
+        $submission = TaskSubmission::query()
+            ->whereHas('assignment', fn ($query) => $query
+                ->where('task_id', $id)
+                ->where('employee_id', $employeeId))
+            ->latest('id')
+            ->first();
+
+        return ApiResponse::success([
+            'task' => $this->presenter->detail($task, $employeeId),
+            'submission' => $submission === null ? null : $this->presenter->submission($submission),
+        ], 'Tugas diajukan untuk penilaian.', 201);
+    }
+
+    private function currentEmployeeId(Request $request): int
+    {
+        $employeeId = $this->access->employeeIdFor(
+            (int) $request->user()->getAuthIdentifier()
+        );
+
+        if ($employeeId === null) {
+            throw new TaskNotFound;
+        }
+
+        return $employeeId;
+    }
+}

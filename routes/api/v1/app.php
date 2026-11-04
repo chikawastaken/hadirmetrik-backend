@@ -24,4 +24,16 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
 
     Route::post('/sync/attendance', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'store']);
     Route::get('/sync/attendance/{id}', [\App\Modules\Attendance\Http\Controllers\AttendanceSyncController::class, 'show']);
+
+    // Phase 5 — Manajemen Tugas
+    Route::get('/tasks', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'index']);
+    Route::get('/tasks/{id}', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'show'])->whereNumber('id');
+    Route::post('/tasks/{id}/start', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'start'])->whereNumber('id');
+    Route::patch('/tasks/{id}/progress', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'progress'])->whereNumber('id');
+    Route::post('/tasks/{id}/submissions', [\App\Modules\Tasks\Http\Controllers\TaskController::class, 'submit'])->whereNumber('id');
+    Route::post('/tasks/{id}/comments', [\App\Modules\Tasks\Http\Controllers\TaskCommentController::class, 'store'])->whereNumber('id');
+    Route::post('/tasks/{id}/attachments', [\App\Modules\Tasks\Http\Controllers\TaskAttachmentController::class, 'store'])->whereNumber('id');
+    Route::get('/tasks/{id}/attachments/{attachmentId}', [\App\Modules\Tasks\Http\Controllers\TaskAttachmentController::class, 'download'])
+        ->whereNumber('id')
+        ->whereNumber('attachmentId');
 });

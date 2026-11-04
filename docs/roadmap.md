@@ -1,8 +1,8 @@
 # HadirMetrik — Milestone & Implementation Roadmap
 
-**Versi:** 1.2  
-**Status:** Phase 1 backend selesai (modular monolith, PR #3); item Phase 0/1 yang tersisa bergantung pada repo mobile  
-**Prioritas saat ini:** Menutup integrasi Flutter M1, lalu Phase 2 (backend)  
+**Versi:** 1.3  
+**Status:** Phase 1–3 MVP, Phase 4 backend, dan Phase 5 backend selesai; integrasi Flutter M5 menjadi slice berikutnya  
+**Prioritas saat ini:** Integrasi Flutter Phase 5, lalu notifikasi in-app dan penguatan face recognition  
 **Arsitektur:** Flutter mobile + Laravel modular monolith + PostgreSQL; face-recognition service terpisah hanya jika diperlukan.
 
 ---
@@ -267,14 +267,17 @@ Urutan ini memprioritaskan jalur login yang berfungsi sesegera mungkin tanpa men
 ## 5. Phase 2 — M2: Identitas Karyawan dan Akses Berbasis Peran
 
 ### Pekerjaan
-- [ ] Lengkapi profil karyawan, status aktif/nonaktif, nomor karyawan, divisi, dan jabatan sesuai kebutuhan.
-- [ ] Definisikan permission karyawan dan HR.
-- [ ] Buat endpoint profil diri dan pembaruan field yang diizinkan.
-- [ ] HR hanya dapat membaca/mengubah data sesuai scope kewenangannya.
-- [ ] Tentukan alur aktivasi, penonaktifan, dan reset akun.
+- [x] Lengkapi profil karyawan, status aktif/nonaktif, nomor karyawan, divisi, dan jabatan sesuai kebutuhan. _(`GET/PATCH /me/profile`, detail karyawan HR)_
+- [x] Definisikan permission karyawan dan HR. _(role `employee`/`hr`/`admin` + middleware `hr.role`)_
+- [x] Buat endpoint profil diri dan pembaruan field yang diizinkan. _(`EmployeeProfileController`, `UpdateEmployeeProfileRequest`)_
+- [x] HR hanya dapat membaca/mengubah data sesuai scope kewenangannya. _(endpoint `/hr/*` ditolak untuk role employee)_
+- [x] Tentukan alur aktivasi, penonaktifan, dan reset akun. _(invitation, accept/set-password, resend/revoke, reset password HR)_
 
 ### Definition of Done
 Akun pengguna terhubung ke satu data karyawan yang valid; akun nonaktif tidak dapat mengakses fitur terlindungi; kontrol akses diuji di sisi API.
+
+### Status penutupan — 2026-11-03
+Phase 2 dinyatakan selesai berdasarkan implementasi dan test yang sudah ada; sebelumnya hanya belum dicentang di dokumen ini.
 
 ---
 
@@ -309,7 +312,7 @@ Phase 3 ditutup sebagai **MVP vertical slice** (backend + Flutter):
 - [ ] Evaluasi face match dan liveness/anti-spoofing sebelum digunakan untuk keputusan produksi.
 - [x] Tambahkan local database/outbox untuk event presensi. _(backend: `attendance_sync_batches`, `attendance_sync_events`; Flutter: `lib/outbox.dart` di atas `shared_preferences`)_
 - [x] Implementasikan batch sync, idempotency key, dan hasil per event. _(backend + `AppState.flushOutbox`; batch key dipakai ulang sampai semua event dijawab server, respons tidak lengkap dipolling lewat `GET /sync/attendance/{id}`)_
-- [ ] Tambahkan retry otomatis dengan backoff di klien. _(flush dipicu saat aplikasi dibuka, setelah login, saat membuka Profil/layar absen, dan lewat tombol manual; percobaan dihitung di outbox, backoff belum)_
+- [x] Tambahkan retry otomatis dengan backoff di klien. _(Flutter: backoff berbatas, error per event, urutan kausal; flush dipicu saat aplikasi dibuka, setelah login, saat membuka Profil/layar absen, dan lewat tombol manual)_
 - [x] Tentukan status `pending_sync`, `synced`, `pending_review`, `rejected`, dan `sync_failed`. _(`attendance_sync_events.status` + `clock_records.status`; `pending_review` dianggap final untuk outbox karena server sudah menyimpan event)_
 - [x] Uji offline, app restart, timeout, duplikasi batch, dan model tidak tersedia. _(test Flutter: reload outbox, hidrasi jam setelah restart, flush gagal, respons 5xx, penolakan server, duplikasi backend; uji perangkat fisik belum)_
 
@@ -332,23 +335,34 @@ Klien Phase 4 terhubung ke kontrak backend (PR HadirMetrik #12, ditinjau ulang d
 - Outbox tahan restart (`shared_preferences`) menyimpan event dan batch key, dibatasi per akun, dan dipulihkan saat aplikasi dibuka. `recordClock` menguras antrean lebih dulu, menyimpan ke outbox saat jaringan gagal atau server 5xx, dan tidak mengulang event yang ditolak server.
 - `occurred_at` dikirim sebagai UTC eksplisit; batch key hanya dirotasi setelah semua event dijawab server.
 - `SyncCard` dan layar absen menampilkan jumlah event tertunda, event `pending_review`, serta penolakan server.
-- Verifikasi: `flutter test` → 39 passed; `flutter analyze` → 3 temuan lama; `flutter build apk --debug` → sukses.
-- Belum: inferensi/liveness, worker pemrosesan enrollment, retry otomatis dengan backoff, device id stabil, uji perangkat fisik offline.
+- Verifikasi: `flutter test` → 53 passed; `flutter analyze` → 3 temuan lama; `flutter build apk --debug` → sukses.
+- Belum: inferensi/liveness dan uji perangkat fisik offline. Retry backoff berbatas dan device id per-install sudah tersedia.
 
 ---
 
 ## 8. Phase 5 — M5: Manajemen Tugas
 
 ### Pekerjaan
-- [ ] HR membuat dan mengubah tugas.
-- [ ] Menetapkan penerima, prioritas, dan tenggat waktu.
-- [ ] Karyawan melihat tugas dan memperbarui progres.
-- [ ] Checklist dan lampiran/bukti kerja bila diperlukan.
-- [ ] Submission, review, approval, dan request revision.
-- [ ] Notifikasi opsional untuk assignment dan perubahan status.
+- [x] HR membuat dan mengubah tugas. _(backend: `POST /hr/tasks`, `GET /hr/tasks`; edit belum)_
+- [x] Menetapkan penerima, prioritas, dan tenggat waktu. _(`assignee_ids`, `priority`, `due_at`)_
+- [x] Karyawan melihat tugas dan memperbarui progres. _(`GET /tasks`, `GET /tasks/{id}`, `POST /tasks/{id}/start`, `PATCH /tasks/{id}/progress`)_
+- [x] Checklist dan lampiran/bukti kerja bila diperlukan. _(template checklist, `POST /tasks/{id}/attachments`, bukti wajib saat `requires_photo_proof`)_
+- [x] Submission, review, approval, dan request revision. _(`POST /tasks/{id}/submissions`, `POST /hr/task-submissions/{id}/review`)_
+- [ ] Notifikasi opsional untuk assignment dan perubahan status. _(slice berikutnya bersama integrasi Flutter)_
 
 ### Definition of Done
 Transisi status tugas hanya dapat dilakukan oleh aktor yang berwenang; semua submission dan keputusan review tersimpan serta bisa ditelusuri.
+
+### Status backend — 2026-11-03
+Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
+
+- Tabel `tasks`, `task_assignments`, `task_submissions`, `task_attachments`, `task_comments`; status hidup per assignment.
+- Endpoint HR: buat/daftar tugas, opsi prioritas, batalkan tugas, nilai submission.
+- Endpoint karyawan: daftar/detail tugas, mulai, progres, submit, komentar, unggah lampiran privat.
+- Lampiran privat di disk `local`; whitelist `jpg/jpeg/png/pdf/docx/xlsx`, maksimum 10 MB.
+- Review hanya oleh pembuat tugas atau HR/admin; pembatalan hanya oleh pembuat atau admin.
+- Verifikasi: `php artisan test` → 147 passed (618 assertions) pada SQLite dan PostgreSQL 17.
+- Berikutnya: integrasi Flutter Phase 5 dan notifikasi in-app.
 
 ---
 
