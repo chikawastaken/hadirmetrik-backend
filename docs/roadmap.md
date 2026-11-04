@@ -1,8 +1,8 @@
 # HadirMetrik — Milestone & Implementation Roadmap
 
-**Versi:** 1.2  
-**Status:** Phase 1 backend selesai (modular monolith, PR #3); item Phase 0/1 yang tersisa bergantung pada repo mobile  
-**Prioritas saat ini:** Menutup integrasi Flutter M1, lalu Phase 2 (backend)  
+**Versi:** 1.3  
+**Status:** Phase 1–3 MVP, Phase 4 backend, dan Phase 5 backend selesai; integrasi Flutter M5 menjadi slice berikutnya  
+**Prioritas saat ini:** Integrasi Flutter Phase 5, lalu notifikasi in-app dan penguatan face recognition  
 **Arsitektur:** Flutter mobile + Laravel modular monolith + PostgreSQL; face-recognition service terpisah hanya jika diperlukan.
 
 ---
