@@ -3,6 +3,7 @@
 namespace App\Modules\Tasks\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Audit\Contracts\AuditLogger;
 use App\Modules\Employees\Contracts\EmployeeDirectory;
 use App\Modules\Tasks\Application\Exceptions\TaskForbidden;
 use App\Modules\Tasks\Application\Exceptions\TaskNotFound;
@@ -23,6 +24,7 @@ final class HrTaskController extends Controller
         private readonly EmployeeDirectory $employees,
         private readonly TaskPresenter $presenter,
         private readonly TaskAccess $access,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function index(Request $request): ApiResponse
@@ -33,9 +35,25 @@ final class HrTaskController extends Controller
             $query->where('status', $request->string('status'));
         }
 
-        $tasks = $query->get()->map(fn (Task $task): array => $this->presenter->detail($task));
+        $paginator = $query->paginate(25);
 
-        return ApiResponse::success(['tasks' => $tasks]);
+        return ApiResponse::success([
+            'tasks' => $paginator->getCollection()
+                ->map(fn (Task $task): array => $this->presenter->summary($task) + [
+                    'assignments' => $task->assignments
+                        ->map(fn (TaskAssignment $assignment): array => $this->presenter->assignment($assignment))
+                        ->values()
+                        ->all(),
+                ])
+                ->values()
+                ->all(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'last_page' => $paginator->lastPage(),
+                'total' => $paginator->total(),
+            ],
+        ]);
     }
 
     public function options(): ApiResponse
@@ -62,10 +80,11 @@ final class HrTaskController extends Controller
         }
 
         $user = $request->user();
+        $actorId = (int) $user->getAuthIdentifier();
 
-        $task = DB::transaction(function () use ($validated, $assigneeIds, $user): Task {
+        $task = DB::transaction(function () use ($validated, $assigneeIds, $actorId, $request): Task {
             $task = Task::create([
-                'created_by' => $user->getAuthIdentifier(),
+                'created_by' => $actorId,
                 'division_id' => $validated['division_id'] ?? null,
                 'title' => $validated['title'],
                 'description' => $validated['description'] ?? null,
@@ -79,11 +98,29 @@ final class HrTaskController extends Controller
             foreach ($assigneeIds as $employeeId) {
                 $task->assignments()->create([
                     'employee_id' => $employeeId,
-                    'status' => 'assigned',
+                    'status' => TaskAssignment::STATUS_ASSIGNED,
                     'progress_percent' => 0,
                     'assigned_at' => now(),
                 ]);
             }
+
+            $this->auditLogger->log(
+                'task',
+                (string) $task->id,
+                'task.created',
+                null,
+                [
+                    'title' => $task->title,
+                    'status' => $task->status,
+                    'assignee_ids' => $assigneeIds,
+                    'requires_photo_proof' => $task->requires_photo_proof,
+                    'due_at' => $task->due_at?->toIso8601String(),
+                ],
+                null,
+                $actorId,
+                $request->ip(),
+                $request->userAgent(),
+            );
 
             return $task;
         });
@@ -97,27 +134,26 @@ final class HrTaskController extends Controller
 
     public function cancel(Request $request, int $id): ApiResponse
     {
-        $task = Task::query()->find($id);
-
-        if ($task === null) {
-            throw new TaskNotFound;
-        }
-
         $user = $request->user();
+        $actorId = (int) $user->getAuthIdentifier();
 
-        if (! $this->access->canCancel(
-            (int) $user->getAuthIdentifier(),
-            (string) $user->role,
-            $task,
-        )) {
-            throw new TaskForbidden('Anda tidak berwenang membatalkan tugas ini.');
-        }
+        $task = DB::transaction(function () use ($request, $id, $user, $actorId): Task {
+            $task = Task::query()->lockForUpdate()->find($id);
 
-        if (! in_array($task->status, [Task::STATUS_DRAFT, Task::STATUS_ASSIGNED], true)) {
-            throw new TaskStateConflict('Tugas yang sudah selesai atau dibatalkan tidak dapat dibatalkan.');
-        }
+            if ($task === null) {
+                throw new TaskNotFound;
+            }
 
-        DB::transaction(function () use ($task): void {
+            if (! $this->access->canCancel($actorId, (string) $user->role, $task)) {
+                throw new TaskForbidden('Anda tidak berwenang membatalkan tugas ini.');
+            }
+
+            if (! in_array($task->status, [Task::STATUS_DRAFT, Task::STATUS_ASSIGNED], true)) {
+                throw new TaskStateConflict('Tugas yang sudah selesai atau dibatalkan tidak dapat dibatalkan.');
+            }
+
+            $before = ['status' => $task->status];
+
             $task->update([
                 'status' => Task::STATUS_CANCELLED,
                 'cancelled_at' => now(),
@@ -130,6 +166,20 @@ final class HrTaskController extends Controller
                     TaskAssignment::STATUS_CANCELLED,
                 ])
                 ->update(['status' => TaskAssignment::STATUS_CANCELLED]);
+
+            $this->auditLogger->log(
+                'task',
+                (string) $task->id,
+                'task.cancelled',
+                $before,
+                ['status' => $task->status, 'cancelled_at' => $task->cancelled_at?->toIso8601String()],
+                null,
+                $actorId,
+                $request->ip(),
+                $request->userAgent(),
+            );
+
+            return $task;
         });
 
         return ApiResponse::success(

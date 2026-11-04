@@ -74,6 +74,67 @@ class TaskReadTest extends TestCase
             ->assertJsonPath('success', false);
     }
 
+    public function test_co_assignee_only_sees_their_own_assignment_and_evidence(): void
+    {
+        $hr = $this->makeHrUser();
+        $task = $this->makeTask(['created_by' => $hr->id]);
+
+        $userA = $this->makeEmployeeUser();
+        $employeeA = $this->makeEmployeeRecord(['user_id' => $userA->id]);
+        $assignmentA = $task->assignments()->create([
+            'employee_id' => $employeeA->id,
+            'status' => 'assigned',
+        ]);
+
+        $userB = $this->makeEmployeeUser();
+        $employeeB = $this->makeEmployeeRecord(['user_id' => $userB->id]);
+        $assignmentB = $task->assignments()->create([
+            'employee_id' => $employeeB->id,
+            'status' => 'submitted',
+        ]);
+
+        $submissionB = \App\Modules\Tasks\Infrastructure\Models\TaskSubmission::create([
+            'task_assignment_id' => $assignmentB->id,
+            'checklist' => [],
+            'review_status' => 'pending',
+            'submitted_at' => now(),
+        ]);
+
+        \App\Modules\Tasks\Infrastructure\Models\TaskAttachment::create([
+            'task_id' => $task->id,
+            'task_submission_id' => $submissionB->id,
+            'kind' => 'evidence',
+            'storage_disk' => 'local',
+            'object_key' => 'tasks/'.$task->id.'/b-evidence.jpg',
+            'original_name' => 'b-evidence.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 100,
+            'sha256' => str_repeat('b', 64),
+            'uploaded_by' => $userB->id,
+        ]);
+
+        \App\Modules\Tasks\Infrastructure\Models\TaskAttachment::create([
+            'task_id' => $task->id,
+            'kind' => 'brief',
+            'storage_disk' => 'local',
+            'object_key' => 'tasks/'.$task->id.'/brief.pdf',
+            'original_name' => 'brief.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 100,
+            'sha256' => str_repeat('c', 64),
+            'uploaded_by' => $hr->id,
+        ]);
+
+        $response = $this->actingAs($userA, 'sanctum')->getJson('/api/v1/tasks/'.$task->id);
+
+        $response->assertOk()
+            ->assertJsonCount(1, 'data.task.assignments')
+            ->assertJsonPath('data.task.assignments.0.id', $assignmentA->id)
+            ->assertJsonCount(0, 'data.task.submissions')
+            ->assertJsonCount(1, 'data.task.attachments')
+            ->assertJsonPath('data.task.attachments.0.kind', 'brief');
+    }
+
     public function test_hr_can_view_task_it_created(): void
     {
         $hr = $this->makeHrUser();

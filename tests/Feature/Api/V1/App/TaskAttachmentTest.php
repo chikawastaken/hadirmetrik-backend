@@ -146,6 +146,88 @@ class TaskAttachmentTest extends TestCase
             ->assertJsonValidationErrors('submission_id');
     }
 
+    public function test_co_assignee_cannot_upload_evidence_to_another_submission(): void
+    {
+        $userA = $this->makeEmployeeUser();
+        $employeeA = $this->makeEmployeeRecord(['user_id' => $userA->id]);
+
+        $userB = $this->makeEmployeeUser();
+        $employeeB = $this->makeEmployeeRecord(['user_id' => $userB->id]);
+
+        $task = $this->makeTask();
+        $task->assignments()->create([
+            'employee_id' => $employeeA->id,
+            'status' => 'submitted',
+        ]);
+        $assignmentB = $task->assignments()->create([
+            'employee_id' => $employeeB->id,
+            'status' => 'submitted',
+        ]);
+        $submissionB = TaskSubmission::create([
+            'task_assignment_id' => $assignmentB->id,
+            'checklist' => [],
+            'review_status' => TaskSubmission::REVIEW_PENDING,
+            'submitted_at' => now(),
+        ]);
+
+        $this->actingAs($userA, 'sanctum')
+            ->post('/api/v1/tasks/'.$task->id.'/attachments', [
+                'file' => UploadedFile::fake()->image('curian.jpg'),
+                'kind' => 'evidence',
+                'submission_id' => $submissionB->id,
+            ])
+            ->assertStatus(403);
+
+        $this->assertDatabaseCount('task_attachments', 0);
+    }
+
+    public function test_attachment_download_respects_assignment_ownership(): void
+    {
+        $userA = $this->makeEmployeeUser();
+        $employeeA = $this->makeEmployeeRecord(['user_id' => $userA->id]);
+
+        $userB = $this->makeEmployeeUser();
+        $employeeB = $this->makeEmployeeRecord(['user_id' => $userB->id]);
+
+        $task = $this->makeTask();
+        $task->assignments()->create([
+            'employee_id' => $employeeA->id,
+            'status' => 'submitted',
+        ]);
+        $assignmentB = $task->assignments()->create([
+            'employee_id' => $employeeB->id,
+            'status' => 'submitted',
+        ]);
+        $submissionB = TaskSubmission::create([
+            'task_assignment_id' => $assignmentB->id,
+            'checklist' => [],
+            'review_status' => TaskSubmission::REVIEW_PENDING,
+            'submitted_at' => now(),
+        ]);
+
+        Storage::disk('local')->put('tasks/'.$task->id.'/b.jpg', 'evidence');
+        $attachment = TaskAttachment::create([
+            'task_id' => $task->id,
+            'task_submission_id' => $submissionB->id,
+            'kind' => 'evidence',
+            'storage_disk' => 'local',
+            'object_key' => 'tasks/'.$task->id.'/b.jpg',
+            'original_name' => 'b.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 8,
+            'sha256' => str_repeat('b', 64),
+            'uploaded_by' => $userB->id,
+        ]);
+
+        $this->actingAs($userA, 'sanctum')
+            ->get('/api/v1/tasks/'.$task->id.'/attachments/'.$attachment->id)
+            ->assertStatus(403);
+
+        $this->actingAs($userB, 'sanctum')
+            ->get('/api/v1/tasks/'.$task->id.'/attachments/'.$attachment->id)
+            ->assertOk();
+    }
+
     public function test_unrelated_employee_cannot_upload(): void
     {
         $user = $this->makeEmployeeUser();

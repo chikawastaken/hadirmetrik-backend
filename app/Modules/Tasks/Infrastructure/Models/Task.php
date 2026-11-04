@@ -5,6 +5,7 @@ namespace App\Modules\Tasks\Infrastructure\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 #[Fillable([
     'created_by',
@@ -47,6 +48,16 @@ class Task extends Model
     public function attachments(): HasMany
     {
         return $this->hasMany(TaskAttachment::class);
+    }
+
+    public function submissions(): HasManyThrough
+    {
+        return $this->hasManyThrough(
+            TaskSubmission::class,
+            TaskAssignment::class,
+            'task_id',
+            'task_assignment_id',
+        );
     }
 
     public function comments(): HasMany

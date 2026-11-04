@@ -38,6 +38,7 @@ return new class extends Migration
             $table->foreignId('employee_id')->constrained('employees')->restrictOnDelete();
             $table->string('status', 24)->default('assigned');
             $table->unsignedTinyInteger('progress_percent')->default(0);
+            $table->json('checklist')->nullable();
             $table->timestampTz('assigned_at')->useCurrent();
             $table->timestampTz('started_at')->nullable();
             $table->timestampTz('completed_at')->nullable();

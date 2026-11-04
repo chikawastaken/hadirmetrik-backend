@@ -361,7 +361,7 @@ Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
 - Endpoint karyawan: daftar/detail tugas, mulai, progres, submit, komentar, unggah lampiran privat.
 - Lampiran privat di disk `local`; whitelist `jpg/jpeg/png/pdf/docx/xlsx`, maksimum 10 MB.
 - Review hanya oleh pembuat tugas atau HR/admin; pembatalan hanya oleh pembuat atau admin.
-- Verifikasi: `php artisan test` → 136 passed (581 assertions) pada SQLite dan PostgreSQL 17.
+- Verifikasi: `php artisan test` → 147 passed (618 assertions) pada SQLite dan PostgreSQL 17.
 - Berikutnya: integrasi Flutter Phase 5 dan notifikasi in-app.
 
 ---

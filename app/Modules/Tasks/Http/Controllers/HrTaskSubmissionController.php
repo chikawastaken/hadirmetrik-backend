@@ -31,6 +31,8 @@ final class HrTaskSubmissionController extends Controller
             $validated['decision'],
             isset($validated['rating']) ? (int) $validated['rating'] : null,
             $validated['note'] ?? null,
+            $request->ip(),
+            $request->userAgent(),
         );
 
         return ApiResponse::success(

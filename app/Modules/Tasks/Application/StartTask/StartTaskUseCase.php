@@ -6,36 +6,43 @@ use App\Modules\Tasks\Application\Exceptions\TaskNotFound;
 use App\Modules\Tasks\Application\Exceptions\TaskStateConflict;
 use App\Modules\Tasks\Infrastructure\Models\Task;
 use App\Modules\Tasks\Infrastructure\Models\TaskAssignment;
+use Illuminate\Support\Facades\DB;
 
 final class StartTaskUseCase
 {
     public function execute(int $taskId, int $employeeId): Task
     {
-        $assignment = TaskAssignment::query()
-            ->with('task')
-            ->where('task_id', $taskId)
-            ->where('employee_id', $employeeId)
-            ->first();
+        return DB::transaction(function () use ($taskId, $employeeId): Task {
+            $assignment = TaskAssignment::query()
+                ->where('task_id', $taskId)
+                ->where('employee_id', $employeeId)
+                ->lockForUpdate()
+                ->first();
 
-        if ($assignment === null) {
-            throw new TaskNotFound;
-        }
+            if ($assignment === null) {
+                throw new TaskNotFound;
+            }
 
-        $task = $assignment->task;
+            $task = Task::query()->lockForUpdate()->find($assignment->task_id);
 
-        if ($task->isTerminal()) {
-            throw new TaskStateConflict('Tugas sudah ditutup atau dibatalkan.');
-        }
+            if ($task === null) {
+                throw new TaskNotFound;
+            }
 
-        if ($assignment->status !== TaskAssignment::STATUS_ASSIGNED) {
-            throw new TaskStateConflict;
-        }
+            if ($task->isTerminal()) {
+                throw new TaskStateConflict('Tugas sudah ditutup atau dibatalkan.');
+            }
 
-        $assignment->update([
-            'status' => TaskAssignment::STATUS_IN_PROGRESS,
-            'started_at' => now(),
-        ]);
+            if ($assignment->status !== TaskAssignment::STATUS_ASSIGNED) {
+                throw new TaskStateConflict;
+            }
 
-        return $task->fresh();
+            $assignment->update([
+                'status' => TaskAssignment::STATUS_IN_PROGRESS,
+                'started_at' => now(),
+            ]);
+
+            return $task->fresh();
+        });
     }
 }

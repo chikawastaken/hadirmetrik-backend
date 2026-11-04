@@ -43,7 +43,7 @@ class TaskSubmissionTest extends TestCase
         $task = $this->makeTask();
         $assignment = $this->makeAssignment($task, $employee->id);
 
-        $this->actingAs($user, 'sanctum')
+        $response = $this->actingAs($user, 'sanctum')
             ->postJson('/api/v1/tasks/'.$task->id.'/submissions', [
                 'note' => 'Sudah selesai, mohon diperiksa.',
                 'checklist' => [
@@ -51,7 +51,9 @@ class TaskSubmissionTest extends TestCase
                 ],
             ])
             ->assertStatus(201)
-            ->assertJsonPath('data.task.assignments.0.status', 'submitted');
+            ->assertJsonPath('data.task.assignments.0.status', 'submitted')
+            ->assertJsonPath('data.submission.review_status', TaskSubmission::REVIEW_PENDING);
+        $this->assertNotNull($response->json('data.submission.id'));
 
         $this->assertSame('submitted', $assignment->refresh()->status);
         $this->assertDatabaseHas('task_submissions', [
@@ -100,6 +102,63 @@ class TaskSubmissionTest extends TestCase
 
         $submission = TaskSubmission::query()->where('task_assignment_id', $assignment->id)->firstOrFail();
         $this->assertSame($submission->id, $attachment->refresh()->task_submission_id);
+    }
+
+    public function test_submission_cannot_reuse_another_users_attachment(): void
+    {
+        $userA = $this->makeEmployeeUser();
+        $employeeA = $this->makeEmployeeRecord(['user_id' => $userA->id]);
+        $task = $this->makeTask(['requires_photo_proof' => true]);
+        $this->makeAssignment($task, $employeeA->id);
+
+        $userB = $this->makeEmployeeUser();
+        $employeeB = $this->makeEmployeeRecord(['user_id' => $userB->id]);
+        $assignmentB = $task->assignments()->create([
+            'employee_id' => $employeeB->id,
+            'status' => 'submitted',
+        ]);
+
+        $attachmentFromB = TaskAttachment::create([
+            'task_id' => $task->id,
+            'kind' => TaskAttachment::KIND_EVIDENCE,
+            'storage_disk' => 'local',
+            'object_key' => 'tasks/'.$task->id.'/b-evidence.jpg',
+            'original_name' => 'b-evidence.jpg',
+            'mime_type' => 'image/jpeg',
+            'size_bytes' => 1024,
+            'sha256' => str_repeat('b', 64),
+            'uploaded_by' => $userB->id,
+        ]);
+
+        $this->actingAs($userA, 'sanctum')
+            ->postJson('/api/v1/tasks/'.$task->id.'/submissions', [
+                'attachment_ids' => [$attachmentFromB->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.code.0', 'EVIDENCE_REQUIRED');
+
+        $this->assertNull($attachmentFromB->refresh()->task_submission_id);
+        $this->assertSame(0, TaskSubmission::query()->where('task_assignment_id', $assignmentB->id)->count());
+    }
+
+    public function test_pending_submission_guard_rejects_a_new_submission(): void
+    {
+        $user = $this->makeEmployeeUser();
+        $employee = $this->makeEmployeeRecord(['user_id' => $user->id]);
+        $task = $this->makeTask();
+        $assignment = $this->makeAssignment($task, $employee->id);
+
+        TaskSubmission::create([
+            'task_assignment_id' => $assignment->id,
+            'checklist' => [],
+            'review_status' => TaskSubmission::REVIEW_PENDING,
+            'submitted_at' => now(),
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/tasks/'.$task->id.'/submissions')
+            ->assertStatus(409)
+            ->assertJsonPath('errors.code.0', 'STATE_NOT_TRANSITIONABLE');
     }
 
     public function test_second_pending_submission_is_rejected(): void

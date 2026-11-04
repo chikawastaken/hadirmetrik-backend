@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'employee_id',
     'status',
     'progress_percent',
+    'checklist',
     'assigned_at',
     'started_at',
     'completed_at',
@@ -30,6 +31,7 @@ class TaskAssignment extends Model
     {
         return [
             'progress_percent' => 'integer',
+            'checklist' => 'array',
             'assigned_at' => 'datetime',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',

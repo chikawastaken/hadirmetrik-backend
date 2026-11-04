@@ -95,6 +95,35 @@ class TaskProgressTest extends TestCase
             ->assertJsonPath('data.task.assignments.0.progress_percent', 0);
     }
 
+    public function test_progress_persists_checklist_state(): void
+    {
+        $user = $this->makeEmployeeUser();
+        $employee = $this->makeEmployeeRecord(['user_id' => $user->id]);
+        $task = $this->makeTask();
+        $assignment = $task->assignments()->create([
+            'employee_id' => $employee->id,
+            'status' => 'in_progress',
+            'started_at' => now(),
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->patchJson('/api/v1/tasks/'.$task->id.'/progress', [
+                'progress_percent' => 40,
+                'checklist' => [
+                    ['key' => 'c1', 'label' => 'Langkah 1', 'done' => true],
+                    ['key' => 'c2', 'label' => 'Langkah 2', 'done' => false],
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.task.assignments.0.checklist.0.done', true)
+            ->assertJsonPath('data.task.assignments.0.checklist.1.done', false);
+
+        $this->assertSame([
+            ['key' => 'c1', 'label' => 'Langkah 1', 'done' => true],
+            ['key' => 'c2', 'label' => 'Langkah 2', 'done' => false],
+        ], $assignment->refresh()->checklist);
+    }
+
     public function test_non_assignee_cannot_update_progress(): void
     {
         $user = $this->makeEmployeeUser();

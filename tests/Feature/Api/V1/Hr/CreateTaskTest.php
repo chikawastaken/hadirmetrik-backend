@@ -72,6 +72,53 @@ class CreateTaskTest extends TestCase
             ->assertJsonPath('success', false);
     }
 
+    public function test_task_creation_is_audited(): void
+    {
+        $hr = $this->makeHrUser();
+        $employee = $this->makeEmployeeRecord();
+
+        $response = $this->actingAs($hr, 'sanctum')->postJson('/api/v1/hr/tasks', [
+            'title' => 'Tugas audit',
+            'priority' => 'medium',
+            'assignee_ids' => [$employee->id],
+        ])->assertStatus(201);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'entity_type' => 'task',
+            'entity_id' => (string) $response->json('data.task.id'),
+            'action' => 'task.created',
+            'actor_user_id' => $hr->id,
+        ]);
+    }
+
+    public function test_hr_task_list_is_paginated(): void
+    {
+        $hr = $this->makeHrUser();
+        $employee = $this->makeEmployeeRecord();
+
+        for ($i = 0; $i < 30; $i++) {
+            $task = \App\Modules\Tasks\Infrastructure\Models\Task::create([
+                'created_by' => $hr->id,
+                'title' => 'Tugas '.$i,
+                'priority' => 'low',
+                'status' => 'assigned',
+                'requires_photo_proof' => false,
+                'checklist_template' => [],
+            ]);
+            $task->assignments()->create([
+                'employee_id' => $employee->id,
+                'status' => 'assigned',
+            ]);
+        }
+
+        $this->actingAs($hr, 'sanctum')
+            ->getJson('/api/v1/hr/tasks')
+            ->assertOk()
+            ->assertJsonCount(25, 'data.tasks')
+            ->assertJsonPath('data.meta.total', 30)
+            ->assertJsonPath('data.meta.per_page', 25);
+    }
+
     public function test_employee_cannot_create_tasks(): void
     {
         $employee = $this->makeEmployeeUser();

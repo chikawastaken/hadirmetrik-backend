@@ -120,6 +120,71 @@ class ReviewTaskSubmissionTest extends TestCase
             ->assertJsonPath('errors.code.0', 'STATE_NOT_TRANSITIONABLE');
     }
 
+    public function test_review_is_rejected_for_a_cancelled_task(): void
+    {
+        $hr = $this->makeHrUser();
+        $task = $this->makeTask([
+            'created_by' => $hr->id,
+            'status' => Task::STATUS_CANCELLED,
+            'cancelled_at' => now(),
+        ]);
+        $employee = $this->makeEmployeeRecord();
+        $assignment = $task->assignments()->create([
+            'employee_id' => $employee->id,
+            'status' => 'submitted',
+        ]);
+        $submission = TaskSubmission::create([
+            'task_assignment_id' => $assignment->id,
+            'checklist' => [],
+            'review_status' => TaskSubmission::REVIEW_PENDING,
+            'submitted_at' => now(),
+        ]);
+
+        $this->actingAs($hr, 'sanctum')
+            ->postJson('/api/v1/hr/task-submissions/'.$submission->id.'/review', [
+                'decision' => 'approved',
+                'rating' => 5,
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('errors.code.0', 'STATE_NOT_TRANSITIONABLE');
+
+        $this->assertSame(TaskSubmission::REVIEW_PENDING, $submission->refresh()->review_status);
+        $this->assertSame('submitted', $assignment->refresh()->status);
+    }
+
+    public function test_review_is_audited(): void
+    {
+        $hr = $this->makeHrUser();
+        $user = $this->makeEmployeeUser();
+        $employee = $this->makeEmployeeRecord(['user_id' => $user->id]);
+        $task = $this->makeTask(['created_by' => $hr->id]);
+        $assignment = $task->assignments()->create([
+            'employee_id' => $employee->id,
+            'status' => 'in_progress',
+            'started_at' => now(),
+        ]);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson('/api/v1/tasks/'.$task->id.'/submissions')
+            ->assertStatus(201);
+
+        $submission = TaskSubmission::query()->where('task_assignment_id', $assignment->id)->firstOrFail();
+
+        $this->actingAs($hr, 'sanctum')
+            ->postJson('/api/v1/hr/task-submissions/'.$submission->id.'/review', [
+                'decision' => 'approved',
+                'rating' => 5,
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('audit_logs', [
+            'entity_type' => 'task_submission',
+            'entity_id' => (string) $submission->id,
+            'action' => 'task_submission.reviewed',
+            'actor_user_id' => $hr->id,
+        ]);
+    }
+
     public function test_task_closes_when_all_assignments_complete(): void
     {
         $hr = $this->makeHrUser();

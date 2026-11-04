@@ -11,6 +11,7 @@ use App\Modules\Tasks\Application\UpdateProgress\UpdateProgressUseCase;
 use App\Modules\Tasks\Http\Presenters\TaskPresenter;
 use App\Modules\Tasks\Infrastructure\Models\Task;
 use App\Modules\Tasks\Infrastructure\Models\TaskAssignment;
+use App\Modules\Tasks\Infrastructure\Models\TaskSubmission;
 use App\Shared\Http\ApiResponse;
 use Illuminate\Http\Request;
 
@@ -48,16 +49,23 @@ final class TaskController extends Controller
     {
         $task = Task::query()->find($id);
         $user = $request->user();
+        $userId = (int) $user->getAuthIdentifier();
 
         if ($task === null || ! $this->access->canView(
-            (int) $user->getAuthIdentifier(),
+            $userId,
             (string) $user->role,
             $task,
         )) {
             return ApiResponse::error('Tugas tidak ditemukan.', 404);
         }
 
-        return ApiResponse::success(['task' => $this->presenter->detail($task)]);
+        $viewerEmployeeId = $user->role === 'employee'
+            ? $this->access->employeeIdFor($userId)
+            : null;
+
+        return ApiResponse::success([
+            'task' => $this->presenter->detail($task, $viewerEmployeeId),
+        ]);
     }
 
     public function start(Request $request, int $id, StartTaskUseCase $useCase): ApiResponse
@@ -95,9 +103,11 @@ final class TaskController extends Controller
             'evidence.*' => ['file', 'mimes:jpg,jpeg,png,pdf,docx,xlsx', 'max:10240'],
         ]);
 
+        $employeeId = $this->currentEmployeeId($request);
+
         $task = $useCase->execute(
             $id,
-            $this->currentEmployeeId($request),
+            $employeeId,
             $validated['note'] ?? null,
             $validated['checklist'] ?? [],
             $request->file('evidence') ?? [],
@@ -105,7 +115,17 @@ final class TaskController extends Controller
             (int) $request->user()->getAuthIdentifier(),
         );
 
-        return ApiResponse::success(['task' => $this->presenter->detail($task)], 'Tugas diajukan untuk penilaian.', 201);
+        $submission = TaskSubmission::query()
+            ->whereHas('assignment', fn ($query) => $query
+                ->where('task_id', $id)
+                ->where('employee_id', $employeeId))
+            ->latest('id')
+            ->first();
+
+        return ApiResponse::success([
+            'task' => $this->presenter->detail($task, $employeeId),
+            'submission' => $submission === null ? null : $this->presenter->submission($submission),
+        ], 'Tugas diajukan untuk penilaian.', 201);
     }
 
     private function currentEmployeeId(Request $request): int

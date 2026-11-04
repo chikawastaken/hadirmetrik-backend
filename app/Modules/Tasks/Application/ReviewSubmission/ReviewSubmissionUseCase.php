@@ -2,6 +2,7 @@
 
 namespace App\Modules\Tasks\Application\ReviewSubmission;
 
+use App\Modules\Audit\Contracts\AuditLogger;
 use App\Modules\Tasks\Application\Exceptions\ReviewForbidden;
 use App\Modules\Tasks\Application\Exceptions\ReviewValidationFailed;
 use App\Modules\Tasks\Application\Exceptions\TaskNotFound;
@@ -16,6 +17,7 @@ final class ReviewSubmissionUseCase
 {
     public function __construct(
         private readonly TaskAccess $access,
+        private readonly AuditLogger $auditLogger,
     ) {}
 
     public function execute(
@@ -25,46 +27,71 @@ final class ReviewSubmissionUseCase
         string $decision,
         ?int $rating = null,
         ?string $note = null,
+        ?string $ipAddress = null,
+        ?string $userAgent = null,
     ): Task {
-        $submission = TaskSubmission::query()
-            ->with('assignment.task')
-            ->find($submissionId);
+        return DB::transaction(function () use (
+            $submissionId,
+            $reviewerUserId,
+            $role,
+            $decision,
+            $rating,
+            $note,
+            $ipAddress,
+            $userAgent,
+        ): Task {
+            $submission = TaskSubmission::query()
+                ->lockForUpdate()
+                ->find($submissionId);
 
-        if ($submission === null || $submission->assignment === null) {
-            throw new TaskNotFound('Pengajuan tidak ditemukan.');
-        }
-
-        $task = $submission->assignment->task;
-
-        if ($task === null) {
-            throw new TaskNotFound;
-        }
-
-        if (! $this->access->canReview($reviewerUserId, $role, $task)) {
-            throw new ReviewForbidden;
-        }
-
-        if ($submission->review_status !== TaskSubmission::REVIEW_PENDING) {
-            throw new TaskStateConflict('Pengajuan ini sudah dinilai.');
-        }
-
-        if ($decision === 'approved') {
-            if ($rating === null) {
-                throw new ReviewValidationFailed('Penilaian wajib diisi.', 'RATING_REQUIRED');
+            if ($submission === null) {
+                throw new TaskNotFound('Pengajuan tidak ditemukan.');
             }
 
-            if ($rating < 1 || $rating > 5) {
-                throw new ReviewValidationFailed('Penilaian harus antara 1 sampai 5.', 'RATING_INVALID');
-            }
-        } elseif ($decision === 'revision_requested') {
-            if ($note === null || trim($note) === '') {
-                throw new ReviewValidationFailed('Catatan revisi wajib diisi.', 'NOTE_REQUIRED');
-            }
-        } else {
-            throw new ReviewValidationFailed('Keputusan penilaian tidak dikenal.', 'DECISION_INVALID');
-        }
+            $assignment = TaskAssignment::query()
+                ->lockForUpdate()
+                ->find($submission->task_assignment_id);
 
-        DB::transaction(function () use ($submission, $task, $reviewerUserId, $decision, $rating, $note): void {
+            if ($assignment === null) {
+                throw new TaskNotFound('Pengajuan tidak ditemukan.');
+            }
+
+            $task = Task::query()->lockForUpdate()->find($assignment->task_id);
+
+            if ($task === null) {
+                throw new TaskNotFound;
+            }
+
+            if (! $this->access->canReview($reviewerUserId, $role, $task)) {
+                throw new ReviewForbidden;
+            }
+
+            if ($task->isTerminal() || $assignment->status === TaskAssignment::STATUS_CANCELLED) {
+                throw new TaskStateConflict('Tugas sudah ditutup atau dibatalkan.');
+            }
+
+            if ($submission->review_status !== TaskSubmission::REVIEW_PENDING) {
+                throw new TaskStateConflict('Pengajuan ini sudah dinilai.');
+            }
+
+            if ($decision === 'approved') {
+                if ($rating === null) {
+                    throw new ReviewValidationFailed('Penilaian wajib diisi.', 'RATING_REQUIRED');
+                }
+
+                if ($rating < 1 || $rating > 5) {
+                    throw new ReviewValidationFailed('Penilaian harus antara 1 sampai 5.', 'RATING_INVALID');
+                }
+            } elseif ($decision === 'revision_requested') {
+                if ($note === null || trim($note) === '') {
+                    throw new ReviewValidationFailed('Catatan revisi wajib diisi.', 'NOTE_REQUIRED');
+                }
+            } else {
+                throw new ReviewValidationFailed('Keputusan penilaian tidak dikenal.', 'DECISION_INVALID');
+            }
+
+            $before = ['review_status' => $submission->review_status];
+
             $submission->update([
                 'review_status' => $decision === 'approved'
                     ? TaskSubmission::REVIEW_APPROVED
@@ -76,13 +103,13 @@ final class ReviewSubmissionUseCase
             ]);
 
             if ($decision === 'approved') {
-                $submission->assignment->update([
+                $assignment->update([
                     'status' => TaskAssignment::STATUS_COMPLETED,
                     'progress_percent' => 100,
                     'completed_at' => now(),
                 ]);
             } else {
-                $submission->assignment->update([
+                $assignment->update([
                     'status' => TaskAssignment::STATUS_REVISION_REQUIRED,
                 ]);
             }
@@ -98,8 +125,26 @@ final class ReviewSubmissionUseCase
             if (! $open && $task->status !== Task::STATUS_CANCELLED) {
                 $task->update(['status' => Task::STATUS_CLOSED]);
             }
-        });
 
-        return $task->fresh();
+            $this->auditLogger->log(
+                'task_submission',
+                (string) $submission->id,
+                'task_submission.reviewed',
+                $before,
+                [
+                    'review_status' => $submission->review_status,
+                    'review_rating' => $submission->review_rating,
+                    'review_note' => $submission->review_note,
+                    'assignment_status' => $assignment->status,
+                    'task_status' => $task->status,
+                ],
+                null,
+                $reviewerUserId,
+                $ipAddress,
+                $userAgent,
+            );
+
+            return $task->fresh();
+        });
     }
 }

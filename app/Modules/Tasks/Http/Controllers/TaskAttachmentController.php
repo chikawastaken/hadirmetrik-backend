@@ -3,6 +3,7 @@
 namespace App\Modules\Tasks\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Tasks\Application\Exceptions\TaskForbidden;
 use App\Modules\Tasks\Application\Support\TaskAccess;
 use App\Modules\Tasks\Http\Presenters\TaskPresenter;
 use App\Modules\Tasks\Infrastructure\Models\Task;
@@ -10,6 +11,7 @@ use App\Modules\Tasks\Infrastructure\Models\TaskAttachment;
 use App\Modules\Tasks\Infrastructure\Models\TaskSubmission;
 use App\Shared\Http\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -43,6 +45,7 @@ final class TaskAttachmentController extends Controller
 
         if ($validated['kind'] === TaskAttachment::KIND_EVIDENCE) {
             $submission = TaskSubmission::query()
+                ->with('assignment')
                 ->whereKey((int) $validated['submission_id'])
                 ->whereHas('assignment', fn ($query) => $query->where('task_id', $task->id))
                 ->first();
@@ -51,6 +54,12 @@ final class TaskAttachmentController extends Controller
                 throw ValidationException::withMessages([
                     'submission_id' => ['Pengajuan tidak ditemukan pada tugas ini.'],
                 ]);
+            }
+
+            if ($submission->assignment?->employee_id !== $this->access->employeeIdFor(
+                (int) $user->getAuthIdentifier()
+            )) {
+                throw new TaskForbidden('Anda hanya dapat menambahkan bukti pada pengajuan sendiri.');
             }
 
             $submissionId = $submission->id;
@@ -78,5 +87,45 @@ final class TaskAttachmentController extends Controller
             'Lampiran diunggah.',
             201,
         );
+    }
+
+    public function download(Request $request, int $taskId, int $attachmentId): mixed
+    {
+        $user = $request->user();
+        $task = Task::query()->find($taskId);
+
+        if ($task === null || ! $this->access->canView(
+            (int) $user->getAuthIdentifier(),
+            (string) $user->role,
+            $task,
+        )) {
+            return ApiResponse::error('Lampiran tidak ditemukan.', 404);
+        }
+
+        $attachment = TaskAttachment::query()
+            ->where('task_id', $task->id)
+            ->find($attachmentId);
+
+        if ($attachment === null) {
+            return ApiResponse::error('Lampiran tidak ditemukan.', 404);
+        }
+
+        if ($user->role === 'employee' && $attachment->kind === TaskAttachment::KIND_EVIDENCE) {
+            $employeeId = $this->access->employeeIdFor((int) $user->getAuthIdentifier());
+            $owns = $attachment->task_submission_id !== null
+                && TaskSubmission::query()
+                    ->whereKey($attachment->task_submission_id)
+                    ->whereHas('assignment', fn ($query) => $query
+                        ->where('task_id', $task->id)
+                        ->where('employee_id', $employeeId))
+                    ->exists();
+
+            if (! $owns) {
+                throw new TaskForbidden('Anda hanya dapat mengunduh bukti milik sendiri.');
+            }
+        }
+
+        return Storage::disk($attachment->storage_disk)
+            ->download($attachment->object_key, $attachment->original_name);
     }
 }

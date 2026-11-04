@@ -101,6 +101,23 @@ class CancelTaskTest extends TestCase
             ->assertStatus(403);
     }
 
+    public function test_cancellation_is_audited(): void
+    {
+        $hr = $this->makeHrUser();
+        $task = $this->makeTask(['created_by' => $hr->id]);
+
+        $this->actingAs($hr, 'sanctum')
+            ->postJson('/api/v1/hr/tasks/'.$task->id.'/cancel')
+            ->assertOk();
+
+        $this->assertDatabaseHas('audit_logs', [
+            'entity_type' => 'task',
+            'entity_id' => (string) $task->id,
+            'action' => 'task.cancelled',
+            'actor_user_id' => $hr->id,
+        ]);
+    }
+
     public function test_closed_task_cannot_be_cancelled(): void
     {
         $hr = $this->makeHrUser();

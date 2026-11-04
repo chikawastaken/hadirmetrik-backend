@@ -8,6 +8,7 @@ use App\Modules\Tasks\Infrastructure\Models\Task;
 use App\Modules\Tasks\Infrastructure\Models\TaskAssignment;
 use App\Modules\Tasks\Infrastructure\Models\TaskAttachment;
 use App\Modules\Tasks\Infrastructure\Models\TaskComment;
+use App\Modules\Tasks\Infrastructure\Models\TaskSubmission;
 
 final class TaskPresenter
 {
@@ -39,22 +40,49 @@ final class TaskPresenter
     /**
      * @return array<string, mixed>
      */
-    public function detail(Task $task): array
+    public function detail(Task $task, ?int $viewerEmployeeId = null): array
     {
-        $task->loadMissing(['assignments', 'attachments', 'comments']);
+        $task->loadMissing(['assignments', 'submissions', 'attachments', 'comments']);
 
-        $employeeNames = $this->employeeNames($task->assignments->all());
+        $assignments = $task->assignments;
+        $submissions = $task->submissions;
+        $attachments = $task->attachments;
+
+        if ($viewerEmployeeId !== null) {
+            $assignments = $assignments
+                ->where('employee_id', $viewerEmployeeId)
+                ->values();
+
+            $ownAssignmentIds = $assignments->pluck('id')->all();
+            $submissions = $submissions
+                ->whereIn('task_assignment_id', $ownAssignmentIds)
+                ->values();
+
+            $ownSubmissionIds = $submissions->pluck('id')->all();
+            $attachments = $attachments
+                ->filter(fn (TaskAttachment $attachment): bool => $attachment->kind === TaskAttachment::KIND_BRIEF
+                    || ($attachment->task_submission_id !== null
+                        && in_array($attachment->task_submission_id, $ownSubmissionIds, true)))
+                ->values();
+        }
+
+        $employeeNames = $this->employeeNames($assignments->all());
         $authorNames = $this->users->namesByIds(
             $task->comments->pluck('author_user_id')->unique()->values()->all()
         );
 
         return $this->summary($task) + [
             'checklist_template' => $task->checklist_template ?? [],
-            'assignments' => $task->assignments
+            'assignments' => $assignments
                 ->map(fn (TaskAssignment $assignment): array => $this->assignment($assignment, $employeeNames))
                 ->values()
                 ->all(),
-            'attachments' => $task->attachments
+            'submissions' => $submissions
+                ->sortByDesc('id')
+                ->map(fn (TaskSubmission $submission): array => $this->submission($submission))
+                ->values()
+                ->all(),
+            'attachments' => $attachments
                 ->map(fn (TaskAttachment $attachment): array => $this->attachment($attachment))
                 ->values()
                 ->all(),
@@ -78,9 +106,28 @@ final class TaskPresenter
             'employee_name' => $employeeNames[$assignment->employee_id] ?? null,
             'status' => $assignment->status,
             'progress_percent' => $assignment->progress_percent,
+            'checklist' => $assignment->checklist ?? [],
             'assigned_at' => $assignment->assigned_at?->toIso8601String(),
             'started_at' => $assignment->started_at?->toIso8601String(),
             'completed_at' => $assignment->completed_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function submission(TaskSubmission $submission): array
+    {
+        return [
+            'id' => $submission->id,
+            'task_assignment_id' => $submission->task_assignment_id,
+            'note' => $submission->note,
+            'checklist' => $submission->checklist ?? [],
+            'review_status' => $submission->review_status,
+            'review_rating' => $submission->review_rating,
+            'review_note' => $submission->review_note,
+            'submitted_at' => $submission->submitted_at?->toIso8601String(),
+            'reviewed_at' => $submission->reviewed_at?->toIso8601String(),
         ];
     }
 
