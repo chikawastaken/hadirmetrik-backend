@@ -1,7 +1,7 @@
 # HadirMetrik — Milestone & Implementation Roadmap
 
-**Versi:** 1.3  
-**Status:** Phase 1–3 MVP, Phase 4 backend, dan Phase 5 backend selesai; integrasi Flutter M5 menjadi slice berikutnya  
+**Versi:** 1.4  
+**Status:** Phase 1–3 MVP, Phase 4 backend, dan Phase 5 backend selesai; M1 Flutter (termasuk sesi 7 hari) selesai; integrasi Flutter M5 menjadi slice berikutnya  
 **Prioritas saat ini:** Integrasi Flutter Phase 5, lalu notifikasi in-app dan penguatan face recognition  
 **Arsitektur:** Flutter mobile + Laravel modular monolith + PostgreSQL; face-recognition service terpisah hanya jika diperlukan.
 
@@ -68,17 +68,16 @@ Menyiapkan alur kerja minimum supaya Flutter dan Laravel bisa dikembangkan dan d
 
 ### Definition of Done
 - [x] Backend dapat dijalankan lokal dan koneksi database terverifikasi (`php artisan serve` + `GET /api/v1/health` mengembalikan `database: connected`).
-- [ ] Flutter dapat mengirim HTTP request ke backend lokal.
+- [x] Flutter dapat mengirim HTTP request ke backend lokal. _(terbukti pada integrasi Phase 3/4)_
 - [x] Kontrak auth dipahami oleh developer Flutter dan backend (OpenAPI di `docs/openapi/auth.yaml`).
 - [x] Tidak ada secret yang disimpan di repository (`composer.json` tidak punya `minimum-stability` dev, `.env` tidak di-commit).
 
-> Satu-satunya item Phase 0 yang belum tertutup adalah verifikasi HTTP request dari Flutter.
-> Item ini hanya bisa diselesaikan setelah repo mobile dibuat; sampai saat itu backend
-> menyediakan `/api/v1/health`, CORS, dan OpenAPI sebagai acuan kontrak.
+> Seluruh item Phase 0 sudah tertutup. Backend menyediakan `/api/v1/health`, CORS,
+> dan OpenAPI sebagai acuan kontrak; Flutter sudah memanggil API sejak Phase 3/4.
 
 ---
 
-## 4. Phase 1 — M1: Authentication MVP (Backend Selesai)
+## 4. Phase 1 — M1: Authentication MVP (Selesai)
 
 ### Tujuan
 Karyawan dapat mendaftar/aktivasi akun, login, tetap login setelah aplikasi ditutup, melihat identitas akun aktif, dan logout.
@@ -143,20 +142,26 @@ Seluruh item backend di atas sudah dikerjakan, diuji, dan di-commit pada commit
   password salah `401`, `/me` `200`, logout `200`, `/me` setelah logout `401`,
   health `200`.
 
-Item yang **belum** selesai murni ada di sisi Flutter (lihat bagian Flutter dan
-Definition of Done di bawah).
+Sisi Flutter juga sudah selesai. Registrasi tidak memakai form publik: karyawan
+masuk lewat tautan undangan (`/invitations/{token}/accept` dan
+`/invitations/{token}/password`), lalu login biasa.
 
 ### Flutter — pekerjaan
 
-- [ ] Buat halaman Register dan Login.
-- [ ] Buat `ApiClient` terpusat dengan base URL dari konfigurasi environment.
-- [ ] Buat model request/response auth dan `AuthRepository`.
-- [ ] Hubungkan form dengan endpoint API; tampilkan loading, validasi, dan error dari server.
-- [ ] Simpan token melalui secure storage perangkat, bukan `SharedPreferences` atau penyimpanan teks biasa.
-- [ ] Saat aplikasi dibuka, pulihkan sesi dengan memeriksa token dan memanggil `/me`.
-- [ ] Buat state yang jelas: `unauthenticated`, `authenticating`, `authenticated`, dan `error`.
-- [ ] Implementasikan logout, hapus token lokal, dan arahkan ke halaman login.
-- [ ] Jangan menyimpan password setelah login.
+- [x] Halaman Login dan alur undangan (accept/set-password); tidak ada registrasi publik.
+- [x] `ApiClient` terpusat (`lib/api.dart`) dengan base URL dari `--dart-define=API_URL`.
+- [x] Model request/response auth dan state sesi (`AppState`, `Session`).
+- [x] Hubungkan form dengan endpoint API; tampilkan loading, validasi, dan error dari server.
+- [x] Simpan token melalui `flutter_secure_storage`, bukan `SharedPreferences` atau penyimpanan teks biasa.
+- [x] Saat aplikasi dibuka, pulihkan sesi dari secure storage dan validasi token lewat `/me` di latar belakang (tetap bisa masuk saat offline).
+- [x] State sesi jelas: belum masuk, memulihkan, terautentikasi, dan sesi berakhir.
+- [x] Implementasikan logout, hapus token lokal, dan arahkan ke halaman login.
+- [x] Jangan menyimpan password setelah login.
+
+**Kedaluwarsa token:** `SANCTUM_EXPIRATION` (menit, default `10080` = 7 hari).
+Login dan set-password mengembalikan `data.expires_at`; klien menyimpannya dan
+meminta login ulang setelah lewat. Respons `401` pada permintaan terproteksi
+menghapus sesi dan kembali ke Login.
 
 ### Kontrak endpoint minimum
 
@@ -244,11 +249,11 @@ M1 dianggap selesai apabila:
 - [x] Password salah menghasilkan error yang aman dan tidak membocorkan apakah akun tertentu ada.
 - [x] Endpoint terlindungi menolak request tanpa token atau dengan token tidak valid.
 - [x] `/me` hanya mengembalikan identitas pengguna terautentikasi.
-- [ ] Token tersimpan aman dan sesi dapat dipulihkan setelah aplikasi ditutup/dibuka kembali. _(sisi Flutter)_
-- [ ] Logout mencabut token dan membersihkan penyimpanan lokal. _(pencabutan token backend selesai; pembersihan storage menyusul di Flutter)_
+- [x] Token tersimpan aman dan sesi dapat dipulihkan setelah aplikasi ditutup/dibuka kembali. _(secure storage + restore; token berlaku 7 hari)_
+- [x] Logout mencabut token dan membersihkan penyimpanan lokal.
 - [x] Role ditetapkan di backend dan tidak dapat dinaikkan melalui payload.
-- [ ] Feature tests backend dan alur utama Flutter lulus. _(feature tests backend lulus: 26 tes; alur Flutter belum ada)_
-- [ ] Flutter terhubung ke API Laravel yang berjalan di lingkungan development, bukan data dummy saja.
+- [x] Feature tests backend dan alur utama Flutter lulus. _(backend 149 tes; Flutter 63 tes)_
+- [x] Flutter terhubung ke API Laravel yang berjalan di lingkungan development, bukan data dummy saja.
 
 ### Urutan implementasi untuk mempercepat hasil
 
@@ -256,9 +261,9 @@ M1 dianggap selesai apabila:
 2. Siapkan migration, model `User`/`Employee`, Sanctum, dan seeder akun uji. ✅ (modul `Identity`/`Employees`)
 3. Implementasikan login, `/me`, logout, lalu tes dengan Postman/HTTP client. ✅
 4. Implementasikan register dan aturan aktivasi. ✅
-5. Integrasikan Flutter: login → simpan token → `/me` → auto-restore → logout. ⬜
-6. Tambahkan register UI dan integrasikan ke backend. ⬜
-7. Uji error, token kedaluwarsa/tidak valid, dan restart aplikasi. ⬜
+5. Integrasikan Flutter: login → simpan token → `/me` → auto-restore → logout. ✅
+6. Tambahkan alur undangan (accept/set-password) dan integrasikan ke backend. ✅
+7. Uji error, token kedaluwarsa/tidak valid, dan restart aplikasi. ✅
 
 Urutan ini memprioritaskan jalur login yang berfungsi sesegera mungkin tanpa menunda aturan keamanan registrasi.
 
