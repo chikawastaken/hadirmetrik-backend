@@ -19,6 +19,7 @@ final class AuthPayload
         return [
             'token' => $result->token->token,
             'token_type' => $result->token->type,
+            'expires_at' => $result->token->expiresAt,
             'must_change_password' => $result->account->mustChangePassword,
             'user' => self::user($result->account),
         ];

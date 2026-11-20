@@ -11,8 +11,8 @@
 
 | Phase | Status dokumen | Kenyataan di repo | Catatan |
 |---|---|---|---|
-| 0 — Fondasi | Hampir selesai | Selesai | Satu checkbox Flutter masih terbuka (`roadmap.md:71`) padahal Flutter sudah memanggil API sejak Phase 3/4 |
-| 1 — M1 Auth | Backend selesai, Flutter menyusul | Backend selesai; Flutter login/change-password/invitation ada, **session restore & secure storage belum** | DoD M1 belum tercapai |
+| 0 — Fondasi | Selesai | Selesai | Checkbox Flutter sudah dibetulkan; Flutter memanggil API sejak Phase 3/4 pr-2026-11-19 |
+| 1 — M1 Auth | Selesai | Selesai | Backend + Flutter, termasuk `flutter_secure_storage`, restore sesi, dan token 7 hari (2026-11-20) |
 | 2 — M2 Identitas | Selesai (2026-11-03) | Backend + Flutter profil nyata (`/me/profile`) | Konsisten |
 | 3 — M3 Presensi | MVP vertical slice | Backend + Flutter (PR #21, #9, #11) | 4 item ditunda: geofence server, aturan terlambat, batas jadwal/timezone, audit koreksi |
 | 4 — M4 Wajah & Offline | Backend + Flutter sync selesai | Outbox, backoff, device id ada | **Belum produksi**: model wajah/liveness belum ada, enrollment tetap `pending`, uji perangkat fisik belum |
@@ -34,7 +34,7 @@
 
 ## 3. Gap yang paling berdampak
 
-1. **Token Flutter hanya di memori.** `Api.token` (`lib/api.dart:32`) tidak dipersistensi; `flutter_secure_storage` tidak ada di `pubspec.yaml`; `shared_preferences` hanya dipakai outbox/device. Artinya tutup aplikasi → login ulang. Ini bertentangan dengan DoD Phase 1 dan melemahkan klaim "MVP vertical slice" untuk Phase 3/4.
+1. ~~**Token Flutter hanya di memori.**~~ **Selesai 2026-11-20:** token, `expires_at`, dan user minimal disimpan di `flutter_secure_storage`; sesi dipulihkan saat aplikasi dibuka dan `401` mengakhiri sesi dengan rapi. Token backend kini berlaku 7 hari (`SANCTUM_EXPIRATION`).
 2. **Flutter M5 belum tersambung.** `lib/screens/tasks.dart` masih seed data, tidak ada method task di `lib/api.dart`. Ini prioritas yang sudah ditetapkan roadmap.
 3. **Kontrak OpenAPI tertinggal.** `docs/openapi/` hanya punya `auth.yaml` (health, login, invitation password, change-password, me, me/profile, logout). Tidak ada kontrak untuk employees HR, clock, schedule, history, correction, face, sync, tasks. Prinsip roadmap #3 ("kunci kontrak sebelum Flutter") belum dipenuhi untuk Phase 3–5.
 4. **Phase 4 belum layak produksi.** Roadmap sudah jujur soal ini, tetapi tabel ringkasan bisa dibaca seolah Phase 4 selesai. Perlu label eksplisit "backend + sync selesai; verifikasi wajah belum".
