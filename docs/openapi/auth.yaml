@@ -80,6 +80,7 @@ paths:
                 data:
                   token: "3|AbCdEf..."
                   token_type: "Bearer"
+                  expires_at: "2026-11-27T10:00:00+00:00"
                   must_change_password: true
                   user:
                     id: 2
@@ -156,6 +157,7 @@ paths:
                 data:
                   token: "4|AbCdEf..."
                   token_type: "Bearer"
+                  expires_at: "2026-11-27T10:00:00+00:00"
                   must_change_password: false
                   user:
                     id: 2
@@ -490,7 +492,7 @@ components:
           description: Pesan sukses; ada hanya jika backend mengisinya.
         data:
           type: object
-          required: [token, token_type, must_change_password, user]
+          required: [token, token_type, expires_at, must_change_password, user]
           properties:
             token:
               type: string
@@ -498,6 +500,13 @@ components:
             token_type:
               type: string
               example: "Bearer"
+            expires_at:
+              type: [string, "null"]
+              format: date-time
+              description: >
+                Waktu kedaluwarsa token (default 7 hari, `SANCTUM_EXPIRATION`).
+                Klien menyimpan nilai ini dan meminta login ulang setelah lewat;
+                `null` berarti token tidak memiliki kedaluwarsa eksplisit.
             must_change_password:
               type: boolean
               description: Jika `true`, klien wajib mengarahkan pengguna ke halaman ganti password.

@@ -46,7 +46,7 @@ cukup menangani satu bentuk error.
 ### Alur token
 
 1. Flutter memanggil `/login`.
-2. Backend mengembalikan `data.token` (Sanctum personal access token).
+2. Backend mengembalikan `data.token` (Sanctum personal access token) dan `data.expires_at` (default 7 hari, diatur `SANCTUM_EXPIRATION` dalam menit).
 3. Flutter menyimpan token di secure storage (**bukan** SharedPreferences).
 4. Setiap request terproteksi mengirim `Authorization: Bearer <token>` dan `Accept: application/json`.
 5. `/me` dipakai untuk memulihkan sesi saat aplikasi dibuka kembali.

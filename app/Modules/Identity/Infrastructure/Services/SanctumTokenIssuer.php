@@ -14,7 +14,14 @@ final class SanctumTokenIssuer implements TokenIssuer
     {
         $user = User::query()->findOrFail($account->id);
 
-        return new IssuedToken($user->createToken($deviceName)->plainTextToken, 'Bearer');
+        $minutes = (int) config('sanctum.expiration');
+        $expiresAt = $minutes > 0 ? now()->addMinutes($minutes) : null;
+
+        return new IssuedToken(
+            $user->createToken($deviceName, ['*'], $expiresAt)->plainTextToken,
+            'Bearer',
+            $expiresAt?->toIso8601String(),
+        );
     }
 
     public function revoke(string $tokenId): void
