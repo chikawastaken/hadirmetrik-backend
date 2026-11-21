@@ -42,6 +42,19 @@ class InvitationDeliveryTest extends TestCase
         $this->assertNotNull($invitation->last_sent_at);
     }
 
+    public function test_delivery_uses_the_base_url_captured_at_dispatch_time(): void
+    {
+        Mail::fake();
+
+        [$invitation, $delivery, $plainToken] = $this->makeInvitation(channel: 'email');
+
+        (new SendInvitationDelivery($delivery->id, $plainToken, 'http://192.168.18.124:8000/invitations'))->handle();
+
+        Mail::assertSent(InvitationMail::class, function (InvitationMail $mail) use ($plainToken): bool {
+            return $mail->invitationUrl === 'http://192.168.18.124:8000/invitations/'.$plainToken;
+        });
+    }
+
     public function test_whatsapp_delivery_is_marked_failed_when_no_gateway_is_configured(): void
     {
         Mail::fake();
