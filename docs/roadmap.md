@@ -401,9 +401,13 @@ Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
 - Lampiran privat di disk `local`; whitelist `jpg/jpeg/png/pdf/docx/xlsx`, maksimum 10 MB.
 - Review hanya oleh pembuat tugas atau HR/admin; pembatalan hanya oleh pembuat atau admin.
 - Verifikasi: `php artisan test` → 147 passed (618 assertions) pada SQLite dan PostgreSQL 17.
-- **Masih terbuka:** integrasi Flutter Phase 5 (`lib/screens/tasks.dart` dan
-  `lib/screens/hr_work.dart` masih statis) dan notifikasi in-app; keduanya
-  menjadi slice berikutnya.
+- **Status integrasi Flutter — 2026-11-21:** API tasks terhubung ke `lib/api.dart`
+  (`taskList`, `taskDetail`, `taskStart`, `taskProgress`, `taskSubmit`,
+  `taskComment`, `taskAttachment`), `TaskItem.fromApi`, dan `fetchTasks()`
+  pada `AppState` (HadirMetrik #18). Daftar tugas kini memuat data dari API,
+  bukan seed. Layar detail, progres, dan submit masih memakai state lokal;
+  slice berikutnya menyambungkan aksi tulis ke endpoint yang sama.
+- **Masih terbuka:** notifikasi in-app dan integrasi Flutter M5 lanjutan.
 
 ---
 
