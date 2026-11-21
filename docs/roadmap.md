@@ -1,9 +1,17 @@
 # HadirMetrik — Milestone & Implementation Roadmap
 
-**Versi:** 1.4  
-**Status:** Phase 1–3 MVP, Phase 4 backend, dan Phase 5 backend selesai; M1 Flutter (termasuk sesi 7 hari) selesai; integrasi Flutter M5 menjadi slice berikutnya  
-**Prioritas saat ini:** Integrasi Flutter Phase 5, lalu notifikasi in-app dan penguatan face recognition  
+**Versi:** 1.5
+**Terakhir diperbarui:** 2026-11-21
+**Status:** Phase 1–3 MVP, Phase 4 backend + offline sync, dan Phase 5 backend selesai; M1 Flutter, konektivitas jaringan lokal, dan deep link undangan selesai; integrasi Flutter M5 menjadi slice berikutnya
+**Prioritas saat ini:** Integrasi Flutter Phase 5, notifikasi in-app, lalu penguatan face recognition
 **Arsitektur:** Flutter mobile + Laravel modular monolith + PostgreSQL; face-recognition service terpisah hanya jika diperlukan.
+
+### Status terbaru — 2026-11-21
+
+- **Konektivitas development** tidak lagi bergantung pada IP Wi-Fi: `adb reverse` + alamat API runtime (`ServerConfig`), dengan cleartext hanya di build debug. (HadirMetrik #16, ADR 0017)
+- **Tautan undangan** mengikuti host yang dipakai klien; request loopback memakai IPv4 LAN mesin, dan `INVITATION_URL` tetap menjadi override produksi. (backend #32, ADR 0016)
+- **Deep link undangan** `hadirmetrik://invitations/<token>` terdaftar di Android; tautan email sekarang membuka aplikasi, bukan Play Store. (HadirMetrik #17)
+- **Verifikasi:** backend 157 tes / 631 assertions (SQLite + PostgreSQL 17), Flutter 69 tes, APK debug, serta uji perangkat fisik untuk health check dan deep link.
 
 ---
 
@@ -14,13 +22,13 @@
 | Runtime     | PHP              | ^8.3 (`composer.json`) | 8.5.8       |
 | Framework   | Laravel          | ^13.17               | 13.37.0       |
 | Auth        | Laravel Sanctum  | ^4.0                 | 4.3.3         |
-| Mobile      | Flutter          | 3.47.x (stable)      | Belum — repo mobile terpisah |
-| Bahasa UI   | Dart             | 3.13.x (ikut Flutter)| Belum — repo mobile terpisah |
+| Mobile      | Flutter          | 3.47.x (stable)      | 3.47.5        |
+| Bahasa UI   | Dart             | 3.13.x (ikut Flutter)| 3.13.4        |
 | Database    | PostgreSQL       | 17+                  | 18.4 (lokal)  |
 
-> Kolom **Terverifikasi** berasal dari `composer.lock`, `php artisan about`, dan
-> `psql --version` di mesin development. Versi mobile ditetapkan oleh tim Flutter
-> setelah repo mobile dibuat.
+> Kolom **Terverifikasi** berasal dari `composer.lock`, `php artisan about`,
+> `psql --version`, serta `flutter --version`/`dart --version` di mesin
+> development. Repo mobile (`HadirMetrik`) dikelola terpisah dari repo backend.
 
 ---
 
@@ -37,11 +45,11 @@
 | Phase | Milestone | Hasil utama | Prioritas |
 |---|---|---|---|
 | 0 | Fondasi proyek dan kontrak API | Repository, environment lokal, struktur backend, kontrak API minimum | Wajib |
-| 1 | **M1 — Authentication MVP** | Register, login, session restoration, `/me`, logout, token aman | **Backend selesai; Flutter menyusul** |
+| 1 | **M1 — Authentication MVP** | Register, login, session restoration, `/me`, logout, token aman | **Selesai (backend + Flutter)** |
 | 2 | M2 — Identitas karyawan dan akses berbasis peran | Profil karyawan, role/permission dasar, pengelolaan akun karyawan | Tinggi |
 | 3 | M3 — Presensi inti | Check-in/out online, jadwal, lokasi, riwayat dan koreksi | Tinggi |
-| 4 | M4 — Verifikasi wajah dan offline sync | Enrollment, evaluasi face verification, outbox lokal, sinkronisasi idempotent | Tinggi |
-| 5 | M5 — Manajemen tugas | Pembuatan tugas, assignment, progres, checklist, bukti dan review | Menengah |
+| 4 | M4 — Verifikasi wajah dan offline sync | Enrollment dan offline sync selesai; evaluasi face/liveness terbuka | Tinggi |
+| 5 | M5 — Manajemen tugas | Backend selesai; integrasi Flutter dan notifikasi berikutnya | Menengah |
 | 6 | M6 — Cuti, izin, dan lembur | Pengajuan, lampiran bila diperlukan, approval, riwayat status | Menengah |
 | 7 | M7 — Transparansi gaji | Daftar periode, komponen gaji, slip gaji dan pembatasan akses | Menengah |
 | 8 | M8 — Dashboard dan monitoring HR | Ringkasan presensi, keterlambatan, peta/lokasi sesuai kebijakan, antrean approval | Menengah |
@@ -57,7 +65,7 @@
 Menyiapkan alur kerja minimum supaya Flutter dan Laravel bisa dikembangkan dan diuji secara terintegrasi.
 
 ### Pekerjaan
-- [x] Tentukan versi PHP/Laravel, Flutter/Dart, dan PostgreSQL yang dipakai tim. — Backend terverifikasi (PHP 8.5.8, Laravel 13.37.0, Sanctum 4.3.3, PostgreSQL 18.4); versi Flutter/Dart menunggu repo mobile.
+- [x] Tentukan versi PHP/Laravel, Flutter/Dart, dan PostgreSQL yang dipakai tim. — Backend terverifikasi (PHP 8.5.8, Laravel 13.37.0, Sanctum 4.3.3, PostgreSQL 18.4); mobile terverifikasi Flutter 3.47.5 / Dart 3.13.4.
 - [x] Siapkan repository backend dan mobile sesuai pembagian tanggung jawab. — Repo backend ini aktif; repo mobile dikelola terpisah.
 - [x] Siapkan `.env.example`; jangan commit file `.env` atau credential. — `.env` masuk `.gitignore`; tidak ada secret di repo.
 - [x] Pastikan Laravel terhubung ke PostgreSQL. — `php artisan migrate:status` semua migrasi `Ran` di connection `pgsql`.
@@ -68,12 +76,24 @@ Menyiapkan alur kerja minimum supaya Flutter dan Laravel bisa dikembangkan dan d
 
 ### Definition of Done
 - [x] Backend dapat dijalankan lokal dan koneksi database terverifikasi (`php artisan serve` + `GET /api/v1/health` mengembalikan `database: connected`).
-- [x] Flutter dapat mengirim HTTP request ke backend lokal. _(terbukti pada integrasi Phase 3/4)_
+- [x] Flutter dapat mengirim HTTP request ke backend lokal. _(terbukti pada integrasi Phase 3/4; sejak 2026-11-21 lewat `adb reverse` + alamat API runtime, tanpa bergantung IP Wi-Fi)_
 - [x] Kontrak auth dipahami oleh developer Flutter dan backend (OpenAPI di `docs/openapi/auth.yaml`).
 - [x] Tidak ada secret yang disimpan di repository (`composer.json` tidak punya `minimum-stability` dev, `.env` tidak di-commit).
 
 > Seluruh item Phase 0 sudah tertutup. Backend menyediakan `/api/v1/health`, CORS,
 > dan OpenAPI sebagai acuan kontrak; Flutter sudah memanggil API sejak Phase 3/4.
+
+### Status konektivitas lokal — 2026-11-21
+
+- **Alamat API runtime:** `lib/server_config.dart` memilih `--dart-define=API_URL`
+  → alamat tersimpan → default `http://127.0.0.1:8000/api/v1`; dialog **Server**
+  di layar Login (build debug) menguji `/health` lalu menyimpan alamat.
+- **`adb reverse`:** `tool/dev_run.sh` menjalankan `adb reverse tcp:8000 tcp:8000`
+  lalu `flutter run`; mendukung beberapa perangkat lewat `ANDROID_SERIAL`.
+- **Cleartext:** hanya `android/app/src/debug/AndroidManifest.xml`; build release
+  tetap menolak HTTP biasa dan harus memakai HTTPS.
+- **Dokumentasi:** `docs/development-local-network.md` dan README repo mobile.
+- **Keputusan:** ADR 0017.
 
 ---
 
@@ -145,6 +165,20 @@ Seluruh item backend di atas sudah dikerjakan, diuji, dan di-commit pada commit
 Sisi Flutter juga sudah selesai. Registrasi tidak memakai form publik: karyawan
 masuk lewat tautan undangan (`/invitations/{token}/accept` dan
 `/invitations/{token}/password`), lalu login biasa.
+
+### Status Flutter M1 — 2026-11-21
+
+- Sesi disimpan di `flutter_secure_storage` dan dipulihkan saat aplikasi dibuka;
+  `/me` divalidasi di latar belakang sehingga cold start offline tetap bisa
+  masuk, dan respons `401` memaksa logout. (HadirMetrik #15)
+- Token berlaku 7 hari (`SANCTUM_EXPIRATION=10080`); `expires_at` disimpan klien. (backend #31)
+- Login, alur undangan accept/set-password, logout, dan pesan error server
+  terhubung ke API nyata.
+- Konektivitas development mengikuti jaringan tanpa rebuild; lihat ADR 0017.
+- Tautan undangan membuka aplikasi lewat skema `hadirmetrik://invitations/<token>`;
+  lihat ADR 0016. (HadirMetrik #17)
+- Verifikasi: `flutter test` → 69 passed; `flutter analyze` → 1 warning lama;
+  `flutter build apk --debug` → sukses; login dan deep link diuji di perangkat fisik.
 
 ### Flutter — pekerjaan
 
@@ -252,7 +286,7 @@ M1 dianggap selesai apabila:
 - [x] Token tersimpan aman dan sesi dapat dipulihkan setelah aplikasi ditutup/dibuka kembali. _(secure storage + restore; token berlaku 7 hari)_
 - [x] Logout mencabut token dan membersihkan penyimpanan lokal.
 - [x] Role ditetapkan di backend dan tidak dapat dinaikkan melalui payload.
-- [x] Feature tests backend dan alur utama Flutter lulus. _(backend 149 tes; Flutter 63 tes)_
+- [x] Feature tests backend dan alur utama Flutter lulus. _(backend 157 tes / 631 assertions di SQLite + PostgreSQL 17; Flutter 69 tes)_
 - [x] Flutter terhubung ke API Laravel yang berjalan di lingkungan development, bukan data dummy saja.
 
 ### Urutan implementasi untuk mempercepat hasil
@@ -319,7 +353,7 @@ Phase 3 ditutup sebagai **MVP vertical slice** (backend + Flutter):
 - [x] Implementasikan batch sync, idempotency key, dan hasil per event. _(backend + `AppState.flushOutbox`; batch key dipakai ulang sampai semua event dijawab server, respons tidak lengkap dipolling lewat `GET /sync/attendance/{id}`)_
 - [x] Tambahkan retry otomatis dengan backoff di klien. _(Flutter: backoff berbatas, error per event, urutan kausal; flush dipicu saat aplikasi dibuka, setelah login, saat membuka Profil/layar absen, dan lewat tombol manual)_
 - [x] Tentukan status `pending_sync`, `synced`, `pending_review`, `rejected`, dan `sync_failed`. _(`attendance_sync_events.status` + `clock_records.status`; `pending_review` dianggap final untuk outbox karena server sudah menyimpan event)_
-- [x] Uji offline, app restart, timeout, duplikasi batch, dan model tidak tersedia. _(test Flutter: reload outbox, hidrasi jam setelah restart, flush gagal, respons 5xx, penolakan server, duplikasi backend; uji perangkat fisik belum)_
+- [x] Uji offline, app restart, timeout, duplikasi batch, dan model tidak tersedia. _(test Flutter: reload outbox, hidrasi jam setelah restart, flush gagal, respons 5xx, penolakan server, duplikasi backend; konektivitas perangkat sudah diverifikasi 2026-11-21 lewat `adb reverse`, health check, dan deep link; uji offline penuh di perangkat belum)_
 
 ### Definition of Done
 Presensi offline disimpan secara tahan restart dan tersinkron tanpa duplikasi. Status lokal tidak disamakan dengan penerimaan final oleh server. Keputusan face recognition telah dievaluasi pada dataset yang mewakili penggunaan sebenarnya.
@@ -340,8 +374,8 @@ Klien Phase 4 terhubung ke kontrak backend (PR HadirMetrik #12, ditinjau ulang d
 - Outbox tahan restart (`shared_preferences`) menyimpan event dan batch key, dibatasi per akun, dan dipulihkan saat aplikasi dibuka. `recordClock` menguras antrean lebih dulu, menyimpan ke outbox saat jaringan gagal atau server 5xx, dan tidak mengulang event yang ditolak server.
 - `occurred_at` dikirim sebagai UTC eksplisit; batch key hanya dirotasi setelah semua event dijawab server.
 - `SyncCard` dan layar absen menampilkan jumlah event tertunda, event `pending_review`, serta penolakan server.
-- Verifikasi: `flutter test` → 53 passed; `flutter analyze` → 3 temuan lama; `flutter build apk --debug` → sukses.
-- Belum: inferensi/liveness dan uji perangkat fisik offline. Retry backoff berbatas dan device id per-install sudah tersedia.
+- Verifikasi: `flutter test` → 53 passed saat slice ini ditutup (total 69 per 2026-11-21); `flutter analyze` → kini tersisa 1 warning lama; `flutter build apk --debug` → sukses.
+- Belum: inferensi/liveness, enrollment dengan model nyata, dan uji offline penuh di perangkat fisik. Konektivitas perangkat sudah terverifikasi pada 2026-11-21. Retry backoff berbatas dan device id per-install sudah tersedia.
 
 ---
 
@@ -367,7 +401,9 @@ Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
 - Lampiran privat di disk `local`; whitelist `jpg/jpeg/png/pdf/docx/xlsx`, maksimum 10 MB.
 - Review hanya oleh pembuat tugas atau HR/admin; pembatalan hanya oleh pembuat atau admin.
 - Verifikasi: `php artisan test` → 147 passed (618 assertions) pada SQLite dan PostgreSQL 17.
-- Berikutnya: integrasi Flutter Phase 5 dan notifikasi in-app.
+- **Masih terbuka:** integrasi Flutter Phase 5 (`lib/screens/tasks.dart` dan
+  `lib/screens/hr_work.dart` masih statis) dan notifikasi in-app; keduanya
+  menjadi slice berikutnya.
 
 ---
 
@@ -447,31 +483,43 @@ Daftar ini adalah pekerjaan konkret yang dapat langsung dibuat sebagai issue Git
 7. `AUTH-07` — Implementasi `POST /api/v1/logout` dan pencabutan token. ✅
 8. `AUTH-08` — Implementasi register/aktivasi terkontrol. ✅
 9. `AUTH-09` — Tambahkan rate limit dan feature tests backend. ✅ 26 tes lulus.
-10. `AUTH-10` — Buat Flutter `ApiClient`, auth model, dan repository. ⬜
-11. `AUTH-11` — Buat UI Login dan integrasi API. ⬜
-12. `AUTH-12` — Simpan/pulihkan token dengan secure storage. ⬜
-13. `AUTH-13` — Buat UI Register dan integrasi API. ⬜
-14. `AUTH-14` — Tambahkan logout, guard navigasi, dan session restoration. ⬜
-15. `AUTH-15` — Uji end-to-end register → login → `/me` → restart app → logout. ⬜
+10. `AUTH-10` — Buat Flutter `ApiClient`, auth model, dan repository. ✅ `lib/api.dart`, `lib/state.dart`.
+11. `AUTH-11` — Buat UI Login dan integrasi API. ✅ termasuk alur undangan.
+12. `AUTH-12` — Simpan/pulihkan token dengan secure storage. ✅ HadirMetrik #15.
+13. `AUTH-13` — Buat UI Register dan integrasi API. ✅ diganti alur undangan; tidak ada registrasi publik.
+14. `AUTH-14` — Tambahkan logout, guard navigasi, dan session restoration. ✅ termasuk `401` → Login.
+15. `AUTH-15` — Uji end-to-end register → login → `/me` → restart app → logout. ✅ diuji di perangkat fisik.
 
 > Catatan: `AUTH-05`–`AUTH-08` pada draf awal menulis path `/auth/*`; kontrak
 > final memakai prefix `/api/v1` sesuai `docs/openapi/auth.yaml`.
 
+### Epic: `DEV — Konektivitas development dan tautan undangan`
+
+1. `DEV-01` — Alamat API runtime + dialog **Server** di build debug. ✅ HadirMetrik #16.
+2. `DEV-02` — `adb reverse` otomatis lewat `tool/dev_run.sh` dan dukungan multi-perangkat. ✅
+3. `DEV-03` — Cleartext HTTP hanya di manifest debug; release tetap HTTPS. ✅
+4. `DEV-04` — Tautan undangan mengikuti host klien dengan fallback IPv4 LAN. ✅ backend #32.
+5. `DEV-05` — Daftarkan skema `hadirmetrik://invitations` di Android. ✅ HadirMetrik #17.
+6. `DEV-06` — Dokumentasi jaringan lokal dan ADR. ✅ `docs/development-local-network.md`, ADR 0016–0017.
+
 ### Urutan branch yang disarankan
 
-Jangan memakai branch permanen `fe` dan `be` sebagai pengganti folder proyek. Gunakan branch pekerjaan yang bisa di-merge:
+Buat branch pekerjaan per slice dan merge lewat PR; jangan memakai branch
+permanen `fe`/`be` sebagai pengganti folder proyek.
 
 ```text
-main
-├── feature/phase-0-foundation     # fondasi backend + kontrak API (PR #2)
-└── feature/auth-modular-monolith  # Phase 1 backend, di-stack di atas phase-0 (PR #3)
-    └── feature/auth-flutter       # integrasi M1 (belum dibuat)
+backend  main
+├── feature/phase-0-foundation      # fondasi + kontrak API (merged)
+├── feature/auth-modular-monolith   # Phase 1 backend (merged)
+└── fix/dynamic-invitation-url      # tautan undangan (PR #32, merged)
+
+mobile   main
+├── feature/session-persistence     # M1 sesi 7 hari (HadirMetrik #15)
+├── fix/dev-network-connectivity    # konektivitas lokal (HadirMetrik #16)
+└── fix/invitation-deeplink         # skema undangan (HadirMetrik #17)
 ```
 
-Jika developer backend dan Flutter bekerja paralel, sepakati kontrak API pada `AUTH-01` terlebih dahulu. Backend dapat memakai contoh JSON kontrak untuk membuat test; Flutter dapat membuat repository/API client dengan kontrak sama.
-
-> PR #3 masih berbasis `feature/phase-0-foundation` karena PR #2 belum di-merge.
-> Setelah PR #2 masuk ke `main`, ubah base PR #3 menjadi `main` sebelum merge.
+Slice berikutnya (integrasi Flutter M5) dimulai dari branch baru di repo mobile.
 
 ---
 
@@ -481,10 +529,10 @@ MVP auth dianggap siap didemokan jika:
 
 - [x] Akun uji tersedia melalui seeder yang aman.
 - [x] Pengguna yang memenuhi syarat dapat mendaftar/aktivasi. _(terverifikasi di level API)_
-- [ ] Pengguna dapat login melalui Flutter yang benar-benar memanggil Laravel API.
-- [ ] Login gagal menampilkan pesan yang wajar, tanpa crash. _(backend sudah mengembalikan pesan aman; UI Flutter menyusul)_
-- [ ] Setelah login, aplikasi menampilkan nama/identitas dari endpoint `/me`.
-- [ ] Setelah aplikasi ditutup dan dibuka kembali, sesi dipulihkan dengan validasi ke server.
+- [x] Pengguna dapat login melalui Flutter yang benar-benar memanggil Laravel API. _(diuji di perangkat fisik)_
+- [x] Login gagal menampilkan pesan yang wajar, tanpa crash. _(pesan error server ditampilkan di layar Login)_
+- [x] Setelah login, aplikasi menampilkan nama/identitas dari endpoint `/me`.
+- [x] Setelah aplikasi ditutup dan dibuka kembali, sesi dipulihkan dengan validasi ke server. _(cold start offline tetap masuk; `/me` divalidasi di latar belakang; `401` → Login)_
 - [x] Logout membuat token lama tidak lagi bisa digunakan.
 - [x] Endpoint protected menolak request tanpa autentikasi.
 - [x] Role tidak bisa dimanipulasi dari payload klien.
@@ -496,5 +544,8 @@ MVP auth dianggap siap didemokan jika:
 
 - Laravel Sanctum, autentikasi API token untuk klien mobile dan API: https://laravel.com/docs/sanctum
 - `flutter_secure_storage`, penyimpanan key-value sensitif menggunakan mekanisme secure storage platform: https://pub.dev/packages/flutter_secure_storage
+- Panduan jaringan lokal: [`docs/development-local-network.md`](development-local-network.md)
+- ADR 0016 — Tautan undangan dan deep link: [`docs/adr/0016-invitation-link-host-and-deep-link.md`](adr/0016-invitation-link-host-and-deep-link.md)
+- ADR 0017 — Konektivitas development: [`docs/adr/0017-development-network-connectivity.md`](adr/0017-development-network-connectivity.md)
 
 Versi package dan konfigurasi aktual harus disesuaikan dengan versi Flutter, Dart, PHP, dan Laravel yang dipilih proyek.

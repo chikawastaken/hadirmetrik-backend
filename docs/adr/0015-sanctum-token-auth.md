@@ -18,7 +18,7 @@ Klien utama adalah aplikasi Flutter (mobile) yang tidak bisa memakai session coo
 
 - Satu paket resmi Laravel untuk mobile dan web; tidak ada dependensi auth pihak ketiga.
 - Setiap request terautentikasi melakukan lookup token ke database (bisa di-cache bila perlu).
-- `expiration` saat ini `null`: token tidak kedaluwarsa sendiri, keamanan bergantung pada pencabutan (logout, reset perangkat, suspend/terminate). Masa berlaku token perlu diputuskan sebelum rilis.
+- Masa berlaku token: 7 hari (`SANCTUM_EXPIRATION=10080`, diputuskan 2026-11-19); login dan set-password mengembalikan `expires_at`. Sebelumnya `expiration` bernilai `null` sehingga keamanan hanya bergantung pada pencabutan.
 - Mengganti mekanisme auth cukup dengan adapter baru untuk `TokenIssuer`.
 
 ## Alternatif ditolak
