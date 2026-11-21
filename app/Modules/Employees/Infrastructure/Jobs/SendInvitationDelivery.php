@@ -18,6 +18,7 @@ final class SendInvitationDelivery implements ShouldBeEncrypted, ShouldQueue
     public function __construct(
         public int $deliveryId,
         public string $plainToken,
+        public ?string $invitationUrlBase = null,
     ) {}
 
     public function handle(): void
@@ -79,7 +80,7 @@ final class SendInvitationDelivery implements ShouldBeEncrypted, ShouldQueue
         return new InvitationMail(
             employeeName: $invitation->employee->full_name,
             employeeNumber: $invitation->employee->employee_number,
-            invitationUrl: rtrim((string) config('invitations.url'), '/').'/'.$this->plainToken,
+            invitationUrl: rtrim($this->invitationUrlBase ?: (string) config('invitations.url'), '/').'/'.$this->plainToken,
             expiresAt: $invitation->expires_at,
         );
     }

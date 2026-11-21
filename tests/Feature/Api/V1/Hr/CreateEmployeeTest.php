@@ -153,6 +153,31 @@ class CreateEmployeeTest extends TestCase
         Queue::assertPushed(SendInvitationDelivery::class, 2);
     }
 
+    public function test_invitation_links_follow_the_host_the_client_used(): void
+    {
+        Queue::fake();
+
+        Sanctum::actingAs($this->hrUser);
+
+        $this->postJson('http://192.168.18.124:8000/api/v1/hr/employees', [
+            'full_name' => 'Putri Ramadhani',
+            'email' => 'putri.r@sinarmetrik.co.id',
+            'phone' => '081227453318',
+            'division_id' => $this->division->id,
+            'job_title' => 'Staf Admin Gudang',
+            'employment_start' => '2026-10-12',
+            'shift_id' => $this->shift->id,
+            'work_location_id' => $this->location->id,
+            'compensation' => ['base_salary' => 4800000],
+            'send_invitation' => true,
+            'invitation_channels' => ['email'],
+        ])->assertStatus(201);
+
+        Queue::assertPushed(SendInvitationDelivery::class, function (SendInvitationDelivery $job): bool {
+            return $job->invitationUrlBase === 'http://192.168.18.124:8000/invitations';
+        });
+    }
+
     public function test_non_hr_cannot_create_employee(): void
     {
         $employeeUser = User::factory()->create([

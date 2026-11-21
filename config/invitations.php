@@ -19,6 +19,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Explicit Override
+    |--------------------------------------------------------------------------
+    |
+    | Set INVITATION_URL to pin the link (for example a public HTTPS domain).
+    | When it is empty, the dispatcher derives the host from the request that
+    | created the invitation, falling back to this machine's LAN IPv4 for
+    | loopback requests (adb reverse, artisan commands).
+    |
+    */
+
+    'explicit_url' => env('INVITATION_URL') ?: null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Default Expiry
     |--------------------------------------------------------------------------
     |

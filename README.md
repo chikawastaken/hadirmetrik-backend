@@ -104,7 +104,16 @@ ADMINER_PORT=8080
 # Kredensial akun awal untuk seeding (wajib diisi agar seeder bisa berjalan)
 SEED_ADMIN_PASSWORD=adminPassword123!
 SEED_EMPLOYEE_PASSWORD=employeePassword123!
+
+# Opsional: tautan undangan. Kosongkan di development agar link mengikuti
+# alamat yang dipakai klien (atau IP LAN komputer untuk request loopback).
+# Isi dengan URL HTTPS publik di produksi.
+INVITATION_URL=
 ```
+
+> Tautan undangan email mengikuti jaringan yang sedang dipakai. Lihat
+> [Tautan undangan email](docs/development-local-network.md#4-tautan-undangan-email)
+> untuk urutan prioritas dan contohnya.
 
 ---
 
@@ -205,13 +214,43 @@ Proyek ini menyediakan `Makefile` agar perintah-perintah umum cukup diketik sing
 
 ## Koneksi dari Aplikasi Flutter / Emulator
 
-Untuk menghubungkan aplikasi **Flutter** ke backend lokal:
+Cara yang direkomendasikan adalah **`adb reverse`**, sehingga alamat API tidak
+bergantung pada IP Wi-Fi dan tetap sama saat berpindah jaringan:
+
+```bash
+# Terminal 1 — backend di semua interface
+php artisan serve --host=0.0.0.0 --port=8000
+
+# Terminal 2 — Flutter
+cd ../HadirMetrik
+tool/dev_run.sh
+```
+
+Script `tool/dev_run.sh` menjalankan `adb reverse tcp:8000 tcp:8000` lalu
+`flutter run`; aplikasi memakai `http://127.0.0.1:8000/api/v1` secara default.
+Untuk beberapa perangkat, tentukan serial:
+
+```bash
+ANDROID_SERIAL=192.168.18.126:37215 tool/dev_run.sh -d 192.168.18.126:37215
+```
+
+Tanpa `adb reverse`, buka layar **Login** di build debug, ketuk **“Server: …”**,
+isi mis. `192.168.18.124:8000`, tekan **Tes**, lalu **Simpan** — tanpa rebuild.
+Alternatif sekali jalan:
+`flutter run --dart-define=API_URL=http://192.168.18.124:8000/api/v1`.
 
 | Platform Klien | Base URL API |
 | :--- | :--- |
+| **Android + `adb reverse`** | `http://127.0.0.1:8000/api/v1` |
 | **Android Emulator** | `http://10.0.2.2:8000/api/v1` |
 | **iOS Simulator** | `http://127.0.0.1:8000/api/v1` |
 | **Real Device (WiFi Sama)** | `http://<IP-Lokal-Komputer>:8000/api/v1` (jalankan `php artisan serve --host 0.0.0.0`) |
+
+> Cleartext HTTP hanya diizinkan di manifest **debug**. Build release tetap
+> memblokir HTTP biasa dan harus memakai HTTPS.
+
+Panduan lengkap (termasuk tautan undangan dan troubleshooting):
+[`docs/development-local-network.md`](docs/development-local-network.md).
 
 ---
 
@@ -281,4 +320,5 @@ Untuk pemahaman lebih mendalam mengenai sistem:
   - [ADR 0007: Invitation Token Hash & Rotation](docs/adr/0007-invitation-token-hash-and-rotation.md)
   - [ADR 0008: Security Events vs Audit Logs](docs/adr/0008-security-events-vs-audit-logs.md)
 - **OpenAPI Specification**: [`docs/openapi/auth.yaml`](docs/openapi/auth.yaml)
+- **Panduan Jaringan Lokal Flutter**: [`docs/development-local-network.md`](docs/development-local-network.md)
 - **Roadmap Proyek**: [`docs/roadmap.md`](docs/roadmap.md)

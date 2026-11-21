@@ -7,8 +7,18 @@ use App\Modules\Employees\Infrastructure\Jobs\SendInvitationDelivery;
 
 final class QueueInvitationDeliveryDispatcher implements InvitationDeliveryDispatcher
 {
+    public function __construct(
+        private readonly InvitationUrlResolver $urls,
+    ) {}
+
     public function dispatch(int $deliveryId, string $plainToken): void
     {
-        SendInvitationDelivery::dispatch($deliveryId, $plainToken)->afterCommit();
+        // Resolve the link while the originating request is still available:
+        // the queued job runs later, without the client's Host header.
+        SendInvitationDelivery::dispatch(
+            $deliveryId,
+            $plainToken,
+            $this->urls->base(),
+        )->afterCommit();
     }
 }
