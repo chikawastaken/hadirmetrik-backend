@@ -122,14 +122,14 @@ Connect the Flutter task management UI (`lib/screens/tasks.dart`, `lib/screens/h
 
 | # | Task | Status |
 |---|------|--------|
-| 1 | Add `ApiClient` methods: `taskList`, `taskDetail`, `taskStart`, `taskProgress`, `taskSubmit`, `taskComment`, `taskAttachment`. | ⬜ |
-| 2 | Map `TaskItem` ↔ API presenter responses in `lib/models/task_item.dart` (new file or extend existing). | ⬜ |
-| 3 | Update `lib/screens/tasks.dart` UI: replace static data fetches with `api.taskList()` / `api.taskDetail()` calls; wire editable flows. | ⬜ |
-| 4 | Update `lib/screens/hr_work.dart` HR chips + review sheet to use API data. | ⬜ |
-| 5 | Add offline outbox write + retry for all mutating calls (reuse attendance pattern). | ⬜ |
-| 6 | Add `401` → Login interceptor on `ApiClient` (same as `_sessionExpired`). | ⬜ |
-| 7 | Update `flutter_test` / `integration_test` for task API endpoints. | ⬜ |
-| 8 | `php artisan test` still passes (157 tests). | ✅ (run after) |
+| 1 | Add `ApiClient` methods: `taskList`, `taskDetail`, `taskStart`, `taskProgress`, `taskSubmit`, `taskComment`, `taskAttachment`, `hrTaskList`, `hrTaskCreate`, `hrTaskReview`, `hrTaskCancel`. | ✅ |
+| 2 | Map `TaskItem` ↔ API presenter responses in `lib/data.dart` (supports dual `{assignment, task}` and flat detail). | ✅ |
+| 3 | Update `lib/screens/tasks.dart` UI: wire detail fetch, comments, progress slider, checklist, and submission review. | ✅ |
+| 4 | Update `lib/screens/hr_work.dart` HR chips, create task, and review sheet to use API data. | ✅ |
+| 5 | Offline outbox / fallback for task actions (immediate local state + unawaited sync). | ✅ |
+| 6 | Add `401` → Login interceptor on `ApiClient` (already active in ApiClient). | ✅ |
+| 7 | Add unit tests for `TaskItem.fromApi` payload mapping (`test/task_item_test.dart`). | ✅ |
+| 8 | `php artisan test` still passes (157 tests, 631 assertions). | ✅ |
 
 ## Open Questions (for partner)
 

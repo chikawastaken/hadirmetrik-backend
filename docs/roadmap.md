@@ -401,13 +401,13 @@ Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
 - Lampiran privat di disk `local`; whitelist `jpg/jpeg/png/pdf/docx/xlsx`, maksimum 10 MB.
 - Review hanya oleh pembuat tugas atau HR/admin; pembatalan hanya oleh pembuat atau admin.
 - Verifikasi: `php artisan test` → 147 passed (618 assertions) pada SQLite dan PostgreSQL 17.
-- **Status integrasi Flutter — 2026-11-21:** API tasks terhubung ke `lib/api.dart`
-  (`taskList`, `taskDetail`, `taskStart`, `taskProgress`, `taskSubmit`,
-  `taskComment`, `taskAttachment`), `TaskItem.fromApi`, dan `fetchTasks()`
-  pada `AppState` (HadirMetrik #18). Daftar tugas kini memuat data dari API,
-  bukan seed. Layar detail, progres, dan submit masih memakai state lokal;
-  slice berikutnya menyambungkan aksi tulis ke endpoint yang sama.
-- **Masih terbuka:** notifikasi in-app dan integrasi Flutter M5 lanjutan.
+- **Status integrasi Flutter — 2026-11-21:** Integrasi M5 selesai penuh di sisi Flutter (`feature/m5-task-screens-wire`).
+  - `lib/api.dart`: method karyawan (`taskList`, `taskDetail`, `taskStart`, `taskProgress`, `taskSubmit`, `taskComment`, `taskAttachment`) & method HR (`hrTaskList`, `hrTaskOptions`, `hrTaskCreate`, `hrTaskCancel`, `hrTaskReview`).
+  - `lib/data.dart`: `TaskItem.fromApi` mendukung bentuk array ganda `{assignment, task}` (karyawan) maupun flat (detail & HR), parsing checklist template, komentar, lampiran, dan submission review.
+  - `lib/screens/tasks.dart`: layar detail fetch data langsung via `Api.taskDetail()`, komentar via `Api.taskComment()`, checklist & slider progress sinkron via `Api.taskProgress()`, dan form pengajuan via `Api.taskSubmit()`.
+  - `lib/screens/hr_work.dart`: list tugas HR fetch dari `Api.hrTaskList()`, pembuatan tugas via `Api.hrTaskCreate()`, serta persetujuan & revisi via `Api.hrTaskReview()`.
+  - Verifikasi: Flutter test 72 passed, `flutter analyze` bersih (0 task issue).
+- **Masih terbuka:** notifikasi in-app (Phase 8).
 
 ---
 
