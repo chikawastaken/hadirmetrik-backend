@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Employees\Application\GetEmployeeDetail\GetEmployeeDetailUseCase;
 use App\Modules\Employees\Application\GetEmployeeOptions\GetEmployeeOptionsUseCase;
 use App\Modules\Employees\Application\Invitations\ResendInvitation;
+use App\Modules\Employees\Application\ListEmployees\ListEmployeesUseCase;
 use App\Modules\Employees\Application\ResetEmployeePassword\ResetEmployeePasswordUseCase;
 use App\Modules\Employees\Contracts\Data\CreateEmployeeInput;
 use App\Modules\Employees\Contracts\EmployeeCreator;
@@ -19,6 +20,21 @@ final class HrEmployeeController extends Controller
     public function __construct(
         private readonly EmployeeCreator $creator,
     ) {}
+
+    public function index(Request $request, ListEmployeesUseCase $useCase): ApiResponse
+    {
+        $search = $request->query('search');
+        $divisionId = $request->filled('division_id') ? (int) $request->query('division_id') : null;
+        $status = $request->query('status');
+
+        return ApiResponse::success(
+            $useCase->execute(
+                search: is_string($search) && $search !== '' ? $search : null,
+                divisionId: $divisionId,
+                status: is_string($status) && $status !== '' ? $status : null,
+            ),
+        );
+    }
 
     public function options(GetEmployeeOptionsUseCase $useCase): ApiResponse
     {

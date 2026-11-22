@@ -318,6 +318,10 @@ Akun pengguna terhubung ke satu data karyawan yang valid; akun nonaktif tidak da
 ### Status penutupan — 2026-11-03
 Phase 2 dinyatakan selesai berdasarkan implementasi dan test yang sudah ada; sebelumnya hanya belum dicentang di dokumen ini.
 
+### Status integrasi Flutter & HR API — 2026-11-22
+- Backend: Endpoint `GET /api/v1/hr/employees` ditambahkan (`ListEmployeesUseCase`, filter pencarian, divisi, dan status) serta diuji (160 tests passing).
+- Flutter: `hr_people.dart` kini memuat daftar karyawan dari live API (`Api.hrEmployeeList`), auto-refresh setelah create employee, dan menyediakan aksi reset kata sandi sementara (`Api.hrResetPassword`) serta kirim ulang undangan (`Api.hrResendInvitation`) pada detail karyawan (`feature/m2-hr-employees-wire`). 74 Flutter tests passing.
+
 ---
 
 ## 6. Phase 3 — M3: Presensi Inti
