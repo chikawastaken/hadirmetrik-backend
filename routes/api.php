@@ -11,4 +11,5 @@ Route::prefix('v1')
         require __DIR__.'/api/v1/app.php';
         require __DIR__.'/api/v1/admin.php';
         require __DIR__.'/api/v1/webhooks.php';
+        require __DIR__.'/api/v1/notifications.php';
     });
