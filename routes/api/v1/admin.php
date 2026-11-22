@@ -2,6 +2,7 @@
 
 use App\Modules\Employees\Http\Controllers\HrEmployeeController;
 use App\Modules\Employees\Http\Controllers\HrInvitationController;
+use App\Modules\Leave\Http\Controllers\ApprovalRequestController;
 use App\Modules\Tasks\Http\Controllers\HrTaskController;
 use App\Modules\Tasks\Http\Controllers\HrTaskSubmissionController;
 use Illuminate\Support\Facades\Route;
@@ -20,4 +21,9 @@ Route::middleware(['auth:sanctum', 'password.changed', 'hr.role'])->prefix('hr')
     Route::post('tasks', [HrTaskController::class, 'store']);
     Route::post('tasks/{id}/cancel', [HrTaskController::class, 'cancel'])->whereNumber('id');
     Route::post('task-submissions/{id}/review', [HrTaskSubmissionController::class, 'review'])->whereNumber('id');
+});
+
+Route::middleware(['auth:sanctum', 'password.changed', 'hr.role'])->prefix('approvals')->group(function (): void {
+    Route::get('requests', [ApprovalRequestController::class, 'index']);
+    Route::post('requests/{id}/decision', [ApprovalRequestController::class, 'decide'])->whereNumber('id');
 });

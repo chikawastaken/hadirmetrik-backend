@@ -13,9 +13,16 @@ interface EmployeeDirectory
 
     public function findByUserId(int $userId): ?EmployeeSummary;
 
+    public function findById(int $id): ?EmployeeSummary;
+
     /**
      * @param  list<int>  $ids
      * @return list<EmployeeSummary>
      */
     public function findActiveByIds(array $ids): array;
+
+    /**
+     * @return list<int>
+     */
+    public function activeEmployeeIdsInDivision(int $divisionId): array;
 }

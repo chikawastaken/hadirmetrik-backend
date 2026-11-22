@@ -36,4 +36,12 @@ Route::middleware(['auth:sanctum', 'password.changed'])->group(function (): void
     Route::get('/tasks/{id}/attachments/{attachmentId}', [\App\Modules\Tasks\Http\Controllers\TaskAttachmentController::class, 'download'])
         ->whereNumber('id')
         ->whereNumber('attachmentId');
+
+    // Phase 6 — Cuti, Izin, dan Lembur
+    Route::get('/administrative-requests/summary', [\App\Modules\Leave\Http\Controllers\AdministrativeRequestController::class, 'summary']);
+    Route::get('/administrative-requests', [\App\Modules\Leave\Http\Controllers\AdministrativeRequestController::class, 'index']);
+    Route::post('/administrative-requests', [\App\Modules\Leave\Http\Controllers\AdministrativeRequestController::class, 'store']);
+    Route::get('/administrative-requests/{id}', [\App\Modules\Leave\Http\Controllers\AdministrativeRequestController::class, 'show'])->whereNumber('id');
+    Route::post('/administrative-requests/{id}/cancel', [\App\Modules\Leave\Http\Controllers\AdministrativeRequestController::class, 'cancel'])->whereNumber('id');
+    Route::post('/administrative-requests/{id}/resubmit', [\App\Modules\Leave\Http\Controllers\AdministrativeRequestController::class, 'resubmit'])->whereNumber('id');
 });

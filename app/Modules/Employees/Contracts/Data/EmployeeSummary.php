@@ -15,5 +15,6 @@ final readonly class EmployeeSummary
         public ?string $divisionName = null,
         public string $employmentStatus = 'active',
         public ?string $faceRegisteredAt = null,
+        public ?int $managerUserId = null,
     ) {}
 }
