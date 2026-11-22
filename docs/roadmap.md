@@ -418,12 +418,20 @@ Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
 ## 9. Phase 6 — M6: Pengajuan Cuti, Izin, dan Lembur
 
 ### Pekerjaan
-- [ ] Form pengajuan dengan field berbeda sesuai jenis pengajuan.
-- [ ] Validasi tanggal, jam lembur, overlap, dan field wajib.
-- [ ] Lampiran privat jika diperlukan.
-- [ ] Daftar pengajuan dan status.
-- [ ] Approval/rejection/request revision oleh HR.
-- [ ] Audit keputusan dan notifikasi opsional.
+- [x] Form pengajuan dengan field berbeda sesuai jenis pengajuan (`cuti`/`izin`/`lembur`).
+- [x] Validasi tanggal, jam lembur, dan field wajib di server (alasan ≥ 10 karakter, kuota cuti tahunan, batas izin 2/bulan, cuti khusus ≤ 3 hari, lembur 0–12 jam); info bentrok divisi dihitung untuk antrean approval.
+- [ ] Lampiran privat jika diperlukan. _(ditunda: butuh tabel `request_attachments` dan endpoint upload; surat dokter/surat tugas belum diwajibkan)_
+- [x] Daftar pengajuan dan status (`GET /administrative-requests`, `GET /administrative-requests/summary`).
+- [x] Approval/rejection/request revision oleh HR (`GET /approvals/requests`, `POST /approvals/requests/{id}/decision`), termasuk antrean dua langkah atasan → HR dan info bentrok divisi.
+- [x] Audit keputusan (`administrative_request.submitted/decided/cancelled/resubmitted`).
+- [x] Pembatalan dan pengajuan ulang (`POST /administrative-requests/{id}/cancel`, `POST /administrative-requests/{id}/resubmit`).
+
+### Implementasi backend
+- Modul `app/Modules/Leave/` dengan model `AdministrativeRequest` dan `RequestApproval`, use case submit/cancel/resubmit/decide, presenter, dan `LeaveAccess`.
+- Migrasi `administrative_requests` + `request_approvals`; kuota dan batas izin dibaca dari `config/hadirmetrik.php` (`LEAVE_ANNUAL_QUOTA_DAYS`, `LEAVE_MAX_IZIN_PER_MONTH`, `LEAVE_MAX_SPECIAL_DAYS`).
+- Kontrak `EmployeeDirectory` diperluas (`findById`, `activeEmployeeIdsInDivision`, `managerUserId`) agar modul Leave tidak mengimpor model Employees.
+- Verifikasi: `php artisan test` → 175 tes / 728 assertions lulus di SQLite in-memory. Run PostgreSQL belum dijalankan ulang karena Docker daemon tidak aktif di mesin ini.
+- **Masih terbuka:** lampiran pengajuan, notifikasi in-app (Phase 8), dan penyambungan layar `lib/screens/leave.dart` ke API.
 
 ### Definition of Done
 Pengajuan dapat dilacak dari submit hingga keputusan; request ganda dan keputusan berulang ditangani; file lampiran tidak dapat diakses pengguna tanpa izin.
