@@ -20,7 +20,10 @@ return [
     ),
 
     'allowed_origins_patterns' => env('APP_ENV', 'production') === 'local'
-        ? ['#^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$#']
+        ? [
+            '#^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$#',
+            '#^vscode-webview://[a-z0-9-]+$#i',
+        ]
         : [],
 
     'allowed_headers' => ['*'],
