@@ -3,7 +3,7 @@
 **Versi:** 1.5
 **Terakhir diperbarui:** 2026-11-21
 **Status:** Phase 1–3 MVP, Phase 4 backend + offline sync, dan Phase 5 backend selesai; M1 Flutter, konektivitas jaringan lokal, dan deep link undangan selesai; integrasi Flutter M5 menjadi slice berikutnya
-**Prioritas saat ini:** Integrasi Flutter Phase 5, notifikasi in-app, lalu penguatan face recognition
+**Prioritas saat ini:** Integrasi Flutter Phase 7 (transparansi gaji) dan Phase 8 (dashboard HR). Notifikasi in-app sudah selesai.
 **Arsitektur:** Flutter mobile + Laravel modular monolith + PostgreSQL; face-recognition service terpisah hanya jika diperlukan.
 
 ### Status terbaru — 2026-11-21
@@ -411,7 +411,7 @@ Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
   - `lib/screens/tasks.dart`: layar detail fetch data langsung via `Api.taskDetail()`, komentar via `Api.taskComment()`, checklist & slider progress sinkron via `Api.taskProgress()`, dan form pengajuan via `Api.taskSubmit()`.
   - `lib/screens/hr_work.dart`: list tugas HR fetch dari `Api.hrTaskList()`, pembuatan tugas via `Api.hrTaskCreate()`, serta persetujuan & revisi via `Api.hrTaskReview()`.
   - Verifikasi: Flutter test 72 passed, `flutter analyze` bersih (0 task issue).
-- **Masih terbuka:** notifikasi in-app (Phase 8).
+- **Masih terbuka:** tidak ada; notifikasi in-app sudah tersambung (lihat catatan modul Notification di bawah).
 
 ---
 
@@ -431,10 +431,18 @@ Backend Phase 5 selesai sebagai modul `App\Modules\Tasks`:
 - Migrasi `administrative_requests` + `request_approvals`; kuota dan batas izin dibaca dari `config/hadirmetrik.php` (`LEAVE_ANNUAL_QUOTA_DAYS`, `LEAVE_MAX_IZIN_PER_MONTH`, `LEAVE_MAX_SPECIAL_DAYS`).
 - Kontrak `EmployeeDirectory` diperluas (`findById`, `activeEmployeeIdsInDivision`, `managerUserId`) agar modul Leave tidak mengimpor model Employees.
 - Verifikasi: `php artisan test` → 175 tes / 728 assertions lulus di SQLite in-memory. Run PostgreSQL belum dijalankan ulang karena Docker daemon tidak aktif di mesin ini.
-- **Masih terbuka:** lampiran pengajuan, notifikasi in-app (Phase 8), dan penyambungan layar `lib/screens/leave.dart` ke API.
+- **Masih terbuka:** lampiran pengajuan (butuh tabel `request_attachments` + endpoint upload). Penyambungan layar `lib/screens/leave.dart` ke API sudah selesai di PR Flutter #23.
 
 ### Definition of Done
 Pengajuan dapat dilacak dari submit hingga keputusan; request ganda dan keputusan berulang ditangani; file lampiran tidak dapat diakses pengguna tanpa izin.
+
+### Implementasi notifikasi in-app (2026-11-23)
+- Modul `app/Modules/Notification/`: model `Notification`, migrasi `notifications` (kategori, judul, body, data JSON, `read_at`, status push), controller, presenter, dan `NotificationServiceProvider`.
+- Endpoint karyawan: `GET /notifications` (terbaru dulu + `unread_count`), `POST /notifications/{id}/read`, `POST /notifications/read-all`.
+- Batas modul dijaga: model Notification tidak mengimpor model Identity; `ModuleBoundaryTest` lulus.
+- Flutter: `Notif.fromApi`, `AppState.fetchNotifications/markNotificationRead/markAllNotificationsRead`, inbox dimuat saat login/pemulihan sesi dan dibersihkan saat logout.
+- Verifikasi: backend `php artisan test` → 180 tes / 744 assertions; Flutter `flutter test` → 88 tes; `flutter analyze` hanya 1 warning lama.
+- **Masih terbuka:** push notification (status push sudah disimpan tetapi pengiriman FCM belum ada) dan undo tandai-semua di server.
 
 ---
 
