@@ -13,6 +13,12 @@ Folder ini memuat kontrak API yang disepakati bersama oleh developer backend
 - **Swagger Editor:** buka <https://editor.swagger.io> lalu import `auth.yaml`.
 - **CLI (opsional):** `npx @redocly/cli lint docs/openapi/auth.yaml`.
 
+Untuk **Try it out**, pilih server `http://localhost:8000` dan pastikan backend
+berjalan (`php artisan serve`). Origin localhost/127.0.0.1 dengan port apa pun
+diizinkan CORS hanya pada `APP_ENV=local`. Jika konfigurasi Laravel di-cache,
+jalankan `php artisan config:clear` lalu mulai ulang server. Server
+`https://api.hadirmetrik.local` adalah placeholder, bukan alamat publik.
+
 ## Ringkasan kontrak
 
 Base path: `/api/v1`. Semua request/response JSON.

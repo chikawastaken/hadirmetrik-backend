@@ -1,6 +1,9 @@
 openapi: 3.1.0
 info:
   title: HadirMetrik API — Auth
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
   description: |
     Kontrak endpoint minimum untuk autentikasi yang dipakai bersama oleh
     developer backend Laravel dan developer mobile Flutter.
@@ -18,7 +21,7 @@ info:
 
     File ini adalah sumber kebenaran kontrak auth. Perubahan pada
     `routes/api/v1/auth.php` harus disertai pembaruan file ini.
-  version: 0.3.0
+  version: 0.4.0
 
 tags:
   - name: System
@@ -38,6 +41,7 @@ paths:
       summary: Health check
       tags: [System]
       operationId: getHealth
+      security: []
       responses:
         '200':
           description: Service healthy
@@ -51,12 +55,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /api/v1/login:
     post:
       summary: Login karyawan
       tags: [Auth]
       operationId: login
+      security: []
       requestBody:
         required: true
         content:
@@ -116,6 +123,7 @@ paths:
   /api/v1/invitations/{token}/password:
     post:
       summary: Buat kata sandi dari link undangan
+      security: []
       description: |
         Dipakai karyawan yang menerima link undangan registrasi wajah. Link
         undangan adalah kredensialnya: endpoint ini publik (tanpa sesi),
@@ -329,33 +337,68 @@ paths:
                     employee_number: "HM-0251"
                     full_name: "Putri Ramadhani"
                     work_email: "putri.r@sinarmetrik.co.id"
-                    job_title: "Staf Admin Gudang"
+                    phone_e164: "+6281234567890"
                     division:
                       id: 1
                       name: "Operasional"
-                    employment_status: "probation"
-                    face_registered: true
-                    face_registered_at: "2026-10-01T08:00:00Z"
+                    job_title: "Staf Admin Gudang"
                     manager:
                       id: 102
                       full_name: "Dimas Ardiansyah"
+                      employee_number: "HM-0102"
+                    employment_start: "2025-02-03"
+                    employment_status: "probation"
+                    face_registered_at: "2026-10-01T08:00:00Z"
                   compensation:
-                    base_salary: 8500000
-                    allowance: 1200000
-                    deductions: 450000
+                    base_salary: "8500000.00"
+                    transport_allowance: "550000.00"
+                    meal_allowance: "660000.00"
+                    total_monthly: "9710000.00"
+                    currency: "IDR"
                   shift_assignment:
                     shift_id: 3
-                    shift_name: "Shift Pagi"
-                    start_time: "08:00"
-                    end_time: "17:00"
+                    name: "Shift Pagi"
+                    is_overnight: false
+                    effective_from: "2026-10-01"
                   work_location_assignment:
                     work_location_id: 2
-                    work_location_name: "Kantor Pusat Yogyakarta"
+                    name: "Kantor Pusat Yogyakarta"
+                    effective_from: "2026-10-01"
                   invitation:
-                    code: "INV-2026-10-01-ABCD"
+                    id: 18
                     status: "accepted"
+                    requested_channels: ["email"]
+                    expires_at: "2026-11-01T08:00:00Z"
+                    deliveries:
+                      - channel: "email"
+                        recipient: "putri.r@sinarmetrik.co.id"
+                        status: "sent"
+                  manager:
+                    id: 102
+                    full_name: "Dimas Ardiansyah"
+                    employee_number: "HM-0102"
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Pengguna masih memakai kata sandi sementara
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Anda harus mengganti kata sandi sebelum mengakses fitur ini."
+                errors:
+                  code: ["PASSWORD_CHANGE_REQUIRED"]
+        '404':
+          description: Akun tidak terhubung dengan data karyawan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Profil karyawan tidak ditemukan."
         '429':
           $ref: '#/components/responses/TooManyRequests'
     patch:
@@ -390,8 +433,34 @@ paths:
                     id: 251
                     employee_number: "HM-0251"
                     full_name: "Putri Ramadhani"
+                    work_email: "putri.r@sinarmetrik.co.id"
+                    phone_e164: "+6281234567890"
+                    division:
+                      id: 2
+                      name: "Distribusi"
+                    job_title: "Staf Senior Admin Gudang"
+                    manager: null
+                    employment_start: "2025-02-03"
+                    employment_status: "probation"
+                    face_registered_at: "2026-10-01T08:00:00Z"
+                  compensation: null
+                  shift_assignment: null
+                  work_location_assignment: null
+                  invitation: null
+                  manager: null
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Pengguna masih memakai kata sandi sementara
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResource'
+              example:
+                success: false
+                message: "Anda harus mengganti kata sandi sebelum mengakses fitur ini."
+                errors:
+                  code: ["PASSWORD_CHANGE_REQUIRED"]
         '422':
           description: Validasi gagal
           content:
@@ -446,6 +515,15 @@ components:
       description: Token yang diterima dari endpoint /login.
 
   responses:
+    Unauthorized:
+      description: Tidak terautentikasi (token hilang, invalid, atau kadaluarsa).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResource'
+          example:
+            success: false
+            message: "Unauthenticated."
     TooManyRequests:
       description: Terlalu banyak permintaan (rate limit `throttle:api`, 60/menit per user/IP).
       content:
@@ -645,22 +723,24 @@ components:
 
     ProfilePatchRequest:
       type: object
-      required: [work_email]
       properties:
         phone_e164:
           type: [string, "null"]
           description: Nomor telepon E.164 (contoh +6281234567890).
           pattern: '^\+[1-9]\d{1,14}$'
+          maxLength: 20
         job_title:
           type: [string, "null"]
           description: Jabatan pekerjaan.
+          maxLength: 100
         division_id:
           type: [integer, "null"]
-          description: ID divisi aktif.
+          description: ID divisi aktif. Divisi nonaktif ditolak 422.
         work_email:
-          type: string
+          type: [string, "null"]
           format: email
-          description: Email kerja (unik di tabel employees).
+          description: Email kerja (unik di tabel employees, harus huruf kecil).
+          maxLength: 255
 
     ProfileResponse:
       type: object
@@ -678,15 +758,37 @@ components:
             employee:
               $ref: '#/components/schemas/EmployeeProfileData'
             compensation:
-              $ref: '#/components/schemas/CompensationData'
+              oneOf:
+                - $ref: '#/components/schemas/CompensationData'
+                - type: "null"
             shift_assignment:
-              $ref: '#/components/schemas/ShiftAssignmentData'
+              oneOf:
+                - $ref: '#/components/schemas/ShiftAssignmentData'
+                - type: "null"
             work_location_assignment:
-              $ref: '#/components/schemas/WorkLocationAssignmentData'
+              oneOf:
+                - $ref: '#/components/schemas/WorkLocationAssignmentData'
+                - type: "null"
             invitation:
-              $ref: '#/components/schemas/InvitationData'
+              oneOf:
+                - $ref: '#/components/schemas/InvitationData'
+                - type: "null"
             manager:
-              $ref: '#/components/schemas/EmployeeProfileData'
+              oneOf:
+                - $ref: '#/components/schemas/EmployeeManagerData'
+                - type: "null"
+
+    EmployeeManagerData:
+      type: object
+      required: [id, full_name, employee_number]
+      properties:
+        id:
+          type: integer
+        full_name:
+          type: string
+        employee_number:
+          type: string
+          example: "HM-0102"
 
     EmployeeProfileData:
       type: object
@@ -695,10 +797,12 @@ components:
         - employee_number
         - full_name
         - work_email
-        - job_title
+        - phone_e164
         - division
+        - job_title
+        - manager
+        - employment_start
         - employment_status
-        - face_registered
         - face_registered_at
       properties:
         id:
@@ -710,8 +814,9 @@ components:
         work_email:
           type: string
           format: email
-        job_title:
+        phone_e164:
           type: [string, "null"]
+          example: "+6281234567890"
         division:
           oneOf:
             - type: object
@@ -722,56 +827,102 @@ components:
                 name:
                   type: string
             - type: "null"
+        job_title:
+          type: [string, "null"]
+        manager:
+          oneOf:
+            - $ref: '#/components/schemas/EmployeeManagerData'
+            - type: "null"
+        employment_start:
+          type: [string, "null"]
+          format: date
+          example: "2025-02-03"
         employment_status:
           type: string
-          enum: [probation, active, contract, terminated]
-        face_registered:
-          type: boolean
+          description: Status kepegawaian dari `employees.employment_status`.
+          example: "probation"
         face_registered_at:
           type: [string, "null"]
           format: date-time
-        manager:
-          oneOf:
-            - $ref: '#/components/schemas/EmployeeProfileData'
-            - type: "null"
 
     CompensationData:
       type: object
+      description: Nilai desimal dikirim sebagai string agar presisi tidak hilang.
       properties:
         base_salary:
-          type: number
-        allowance:
-          type: number
-        deductions:
-          type: number
+          type: string
+          example: "8500000.00"
+        transport_allowance:
+          type: string
+          example: "550000.00"
+        meal_allowance:
+          type: string
+          example: "660000.00"
+        total_monthly:
+          type: string
+          example: "9710000.00"
+        currency:
+          type: string
+          example: "IDR"
 
     ShiftAssignmentData:
       type: object
       properties:
         shift_id:
           type: integer
-        shift_name:
+        name:
           type: string
-        start_time:
+          example: "Shift Pagi"
+        is_overnight:
+          type: boolean
+        effective_from:
           type: string
-        end_time:
-          type: string
+          format: date
 
     WorkLocationAssignmentData:
       type: object
       properties:
         work_location_id:
           type: integer
-        work_location_name:
+        name:
           type: string
+          example: "Kantor Pusat Yogyakarta"
+        effective_from:
+          type: string
+          format: date
 
     InvitationData:
       type: object
       properties:
-        code:
-          type: string
+        id:
+          type: integer
         status:
           type: string
+          description: Status undangan, mis. `pending`, `sent`, `accepted`, `expired`, `revoked`.
+          example: "accepted"
+        requested_channels:
+          type: array
+          items:
+            type: string
+          example: ["email"]
+        expires_at:
+          type: string
+          format: date-time
+        deliveries:
+          type: array
+          items:
+            type: object
+            properties:
+              channel:
+                type: string
+                example: "email"
+              recipient:
+                type: string
+                example: "putri.r@sinarmetrik.co.id"
+              status:
+                type: string
+                description: Status pengiriman, mis. `queued`, `sent`, `failed`.
+                example: "sent"
 
     LogoutResponse:
       type: object
@@ -815,4 +966,4 @@ components:
         errors:
           type: [object, array, "null"]
           description: Detail validasi/kegagalan (opsional). Umumnya map field → daftar pesan.
-# Task 5: /me/profile GET/PATCH documented — updated 2026-10-31
+# Task 5: /me/profile GET/PATCH documented — updated 2026-11-23

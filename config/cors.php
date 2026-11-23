@@ -19,7 +19,9 @@ return [
         env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:8080,http://10.0.2.2:8080,https://editor.swagger.io')
     ),
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => env('APP_ENV', 'production') === 'local'
+        ? ['#^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$#']
+        : [],
 
     'allowed_headers' => ['*'],
 
