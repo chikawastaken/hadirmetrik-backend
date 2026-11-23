@@ -6,6 +6,7 @@ Folder ini memuat kontrak API yang disepakati bersama oleh developer backend
 | File | Isi |
 |------|-----|
 | `auth.yaml` | Kontrak minimum untuk health check + autentikasi (login, `/me`, logout). |
+| `app.yaml` | Kontrak gabungan: auth + profil + tugas + HR + cuti/izin/lembur + notifikasi (OpenAPI 3.1). |
 
 ## Cara membuka
 
@@ -15,9 +16,10 @@ Folder ini memuat kontrak API yang disepakati bersama oleh developer backend
 
 Untuk **Try it out**, pilih server `http://localhost:8000` dan pastikan backend
 berjalan (`php artisan serve`). Origin localhost/127.0.0.1 dengan port apa pun
-diizinkan CORS hanya pada `APP_ENV=local`. Jika konfigurasi Laravel di-cache,
-jalankan `php artisan config:clear` lalu mulai ulang server. Server
-`https://api.hadirmetrik.local` adalah placeholder, bukan alamat publik.
+serta VS Code Webview diizinkan CORS hanya pada `APP_ENV=local`. Jika konfigurasi
+Laravel di-cache, jalankan `php artisan config:clear` lalu mulai ulang server.
+Tambahkan URL server production ke `auth.yaml` hanya setelah alamat production
+tersedia.
 
 ## Ringkasan kontrak
 

@@ -32,8 +32,6 @@ tags:
 servers:
   - url: http://localhost:8000
     description: Local development
-  - url: https://api.hadirmetrik.local
-    description: Production (placeholder)
 
 paths:
   /api/v1/health:
