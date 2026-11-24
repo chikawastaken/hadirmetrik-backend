@@ -9,7 +9,7 @@
 ### Status terbaru — 2026-11-24
 
 - **Sudah di `main`:** sesi 7 hari (HadirMetrik #15), M2 daftar karyawan HR (#21, #22), M5 tugas (#18, #21, #26), M6 cuti/izin/lembur (backend #36, HadirMetrik #23), notifikasi in-app (backend #37–#39, HadirMetrik #24), kontrak OpenAPI gabungan (backend #40, #41).
-- **Dalam PR:** slice M3 koreksi presensi (backend #42, HadirMetrik #27) — lihat Phase 3.
+- **Sudah di `main`:** slice M3 koreksi presensi (backend #42, HadirMetrik #27) — lihat Phase 3.
 - **Verifikasi (2026-11-24, termasuk slice lokal):** backend 184 tes / 754 assertions (SQLite), Flutter 88 tes, `flutter analyze` 0 issue.
 
 ### Status — 2026-11-21
