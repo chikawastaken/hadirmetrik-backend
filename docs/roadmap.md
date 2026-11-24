@@ -9,7 +9,7 @@
 ### Status terbaru — 2026-11-24
 
 - **Sudah di `main`:** sesi 7 hari (HadirMetrik #15), M2 daftar karyawan HR (#21, #22), M5 tugas (#18, #21, #26), M6 cuti/izin/lembur (backend #36, HadirMetrik #23), notifikasi in-app (backend #37–#39, HadirMetrik #24), kontrak OpenAPI gabungan (backend #40, #41).
-- **Belum di-commit (lokal Chika):** slice M3 koreksi presensi — lihat Phase 3.
+- **Dalam PR:** slice M3 koreksi presensi (backend #42, HadirMetrik #27) — lihat Phase 3.
 - **Verifikasi (2026-11-24, termasuk slice lokal):** backend 184 tes / 754 assertions (SQLite), Flutter 88 tes, `flutter analyze` 0 issue.
 
 ### Status — 2026-11-21
@@ -351,7 +351,7 @@ Phase 3 ditutup sebagai **MVP vertical slice** (backend + Flutter):
 - **Verifikasi**: `php artisan test` lulus; `flutter analyze` 0 error; `flutter build apk --debug` sukses.
 - **Ditunda**: enforcement geofence server-side, aturan keterlambatan, batas jadwal, dan audit log koreksi (kandidat Phase 4/8).
 
-### Slice M3 koreksi presensi — 2026-11-24 (lokal, belum di-commit)
+### Slice M3 koreksi presensi — 2026-11-24 (backend #42, HadirMetrik #27)
 - Backend: `PATCH /history/{id}/correction` mewajibkan `reason` (5–500 karakter) dan hanya untuk catatan milik pemanggil (selain itu 404); `GET /history` menambah `id` dan `correction_reason`; `GET /schedule` menambah `shift` milik karyawan; migrasi `2026_11_07_100000_add_correction_reason_to_clock_records`; `HistoryCorrectionTest`.
 - Flutter: `History` memakai data API, form alasan koreksi, label shift dari `/schedule`, dan ubah nomor telepon di Profil (`PATCH /me/profile`).
 - Belum: antrean dan keputusan koreksi di sisi HR (endpoint belum ada).
