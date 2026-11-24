@@ -1,12 +1,18 @@
 # HadirMetrik — Milestone & Implementation Roadmap
 
-**Versi:** 1.5
-**Terakhir diperbarui:** 2026-11-21
-**Status:** Phase 1–3 MVP, Phase 4 backend + offline sync, dan Phase 5 backend selesai; M1 Flutter, konektivitas jaringan lokal, dan deep link undangan selesai; integrasi Flutter M5 menjadi slice berikutnya
+**Versi:** 1.6
+**Terakhir diperbarui:** 2026-11-24
+**Status:** Phase 1–3 MVP, Phase 4 backend + offline sync, dan Phase 5 backend selesai; Phase 6 (tanpa lampiran) dan notifikasi in-app selesai; integrasi Flutter M1, M2, M5, M6, dan notifikasi sudah di `main`
 **Prioritas saat ini:** Integrasi Flutter Phase 7 (transparansi gaji) dan Phase 8 (dashboard HR). Notifikasi in-app sudah selesai.
 **Arsitektur:** Flutter mobile + Laravel modular monolith + PostgreSQL; face-recognition service terpisah hanya jika diperlukan.
 
-### Status terbaru — 2026-11-21
+### Status terbaru — 2026-11-24
+
+- **Sudah di `main`:** sesi 7 hari (HadirMetrik #15), M2 daftar karyawan HR (#21, #22), M5 tugas (#18, #21, #26), M6 cuti/izin/lembur (backend #36, HadirMetrik #23), notifikasi in-app (backend #37–#39, HadirMetrik #24), kontrak OpenAPI gabungan (backend #40, #41).
+- **Belum di-commit (lokal Chika):** slice M3 koreksi presensi — lihat Phase 3.
+- **Verifikasi (2026-11-24, termasuk slice lokal):** backend 184 tes / 754 assertions (SQLite), Flutter 88 tes, `flutter analyze` 0 issue.
+
+### Status — 2026-11-21
 
 - **Konektivitas development** tidak lagi bergantung pada IP Wi-Fi: `adb reverse` + alamat API runtime (`ServerConfig`), dengan cleartext hanya di build debug. (HadirMetrik #16, ADR 0017)
 - **Tautan undangan** mengikuti host yang dipakai klien; request loopback memakai IPv4 LAN mesin, dan `INVITATION_URL` tetap menjadi override produksi. (backend #32, ADR 0016)
@@ -49,8 +55,8 @@
 | 2 | M2 — Identitas karyawan dan akses berbasis peran | Profil karyawan, role/permission dasar, pengelolaan akun karyawan | Tinggi |
 | 3 | M3 — Presensi inti | Check-in/out online, jadwal, lokasi, riwayat dan koreksi | Tinggi |
 | 4 | M4 — Verifikasi wajah dan offline sync | Enrollment dan offline sync selesai; evaluasi face/liveness terbuka | Tinggi |
-| 5 | M5 — Manajemen tugas | Backend selesai; integrasi Flutter dan notifikasi berikutnya | Menengah |
-| 6 | M6 — Cuti, izin, dan lembur | Pengajuan, lampiran bila diperlukan, approval, riwayat status | Menengah |
+| 5 | M5 — Manajemen tugas | **Selesai (backend + Flutter)**; edit tugas belum | Menengah |
+| 6 | M6 — Cuti, izin, dan lembur | **Selesai (backend + Flutter)** kecuali lampiran | Menengah |
 | 7 | M7 — Transparansi gaji | Daftar periode, komponen gaji, slip gaji dan pembatasan akses | Menengah |
 | 8 | M8 — Dashboard dan monitoring HR | Ringkasan presensi, keterlambatan, peta/lokasi sesuai kebijakan, antrean approval | Menengah |
 | 9 | M9 — Production readiness | Security review, load test, backup/restore, monitoring dan deployment | Wajib sebelum produksi |
@@ -345,6 +351,11 @@ Phase 3 ditutup sebagai **MVP vertical slice** (backend + Flutter):
 - **Verifikasi**: `php artisan test` lulus; `flutter analyze` 0 error; `flutter build apk --debug` sukses.
 - **Ditunda**: enforcement geofence server-side, aturan keterlambatan, batas jadwal, dan audit log koreksi (kandidat Phase 4/8).
 
+### Slice M3 koreksi presensi — 2026-11-24 (lokal, belum di-commit)
+- Backend: `PATCH /history/{id}/correction` mewajibkan `reason` (5–500 karakter) dan hanya untuk catatan milik pemanggil (selain itu 404); `GET /history` menambah `id` dan `correction_reason`; `GET /schedule` menambah `shift` milik karyawan; migrasi `2026_11_07_100000_add_correction_reason_to_clock_records`; `HistoryCorrectionTest`.
+- Flutter: `History` memakai data API, form alasan koreksi, label shift dari `/schedule`, dan ubah nomor telepon di Profil (`PATCH /me/profile`).
+- Belum: antrean dan keputusan koreksi di sisi HR (endpoint belum ada).
+
 ---
 
 ## 7. Phase 4 — M4: Verifikasi Wajah dan Offline Sync
@@ -391,7 +402,7 @@ Klien Phase 4 terhubung ke kontrak backend (PR HadirMetrik #12, ditinjau ulang d
 - [x] Karyawan melihat tugas dan memperbarui progres. _(`GET /tasks`, `GET /tasks/{id}`, `POST /tasks/{id}/start`, `PATCH /tasks/{id}/progress`)_
 - [x] Checklist dan lampiran/bukti kerja bila diperlukan. _(template checklist, `POST /tasks/{id}/attachments`, bukti wajib saat `requires_photo_proof`)_
 - [x] Submission, review, approval, dan request revision. _(`POST /tasks/{id}/submissions`, `POST /hr/task-submissions/{id}/review`)_
-- [ ] Notifikasi opsional untuk assignment dan perubahan status. _(slice berikutnya bersama integrasi Flutter)_
+- [ ] Notifikasi opsional untuk assignment dan perubahan status. _(modul inbox sudah ada, lihat Phase 6; belum ada kode yang membuat notifikasi dari event tugas)_
 
 ### Definition of Done
 Transisi status tugas hanya dapat dilakukan oleh aktor yang berwenang; semua submission dan keputusan review tersimpan serta bisa ditelusuri.
@@ -543,7 +554,7 @@ mobile   main
 └── fix/invitation-deeplink         # skema undangan (HadirMetrik #17)
 ```
 
-Slice berikutnya (integrasi Flutter M5) dimulai dari branch baru di repo mobile.
+Slice berikutnya (Phase 7 gaji dan Phase 8 dashboard HR) dimulai dari branch baru di tiap repo.
 
 ---
 

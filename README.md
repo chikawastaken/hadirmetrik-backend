@@ -24,7 +24,7 @@ Panduan ini ditujukan bagi developer (khususnya tim **Frontend Flutter** atau an
 ## Prasyarat Sistem
 
 Sebelum memulai, pastikan perangkat lokal Anda telah terinstal:
-- **PHP 8.2+** (disarankan PHP 8.3 / 8.4) beserta ekstensi `pdo_pgsql`, `mbstring`, `openssl`, `curl`.
+- **PHP 8.3+** (disarankan 8.4) beserta ekstensi `pdo_pgsql`, `mbstring`, `openssl`, `curl`.
 - **Composer 2.x**
 - **Docker & Docker Compose** (untuk database PostgreSQL lokal).
 
@@ -319,6 +319,6 @@ Untuk pemahaman lebih mendalam mengenai sistem:
   - [ADR 0006: Compensation Packages vs Salary](docs/adr/0006-compensation-packages-vs-salary-statements.md)
   - [ADR 0007: Invitation Token Hash & Rotation](docs/adr/0007-invitation-token-hash-and-rotation.md)
   - [ADR 0008: Security Events vs Audit Logs](docs/adr/0008-security-events-vs-audit-logs.md)
-- **OpenAPI Specification**: [`docs/openapi/auth.yaml`](docs/openapi/auth.yaml)
+- **OpenAPI Specification**: [`docs/openapi/app.yaml`](docs/openapi/app.yaml) (gabungan), [`docs/openapi/auth.yaml`](docs/openapi/auth.yaml)
 - **Panduan Jaringan Lokal Flutter**: [`docs/development-local-network.md`](docs/development-local-network.md)
 - **Roadmap Proyek**: [`docs/roadmap.md`](docs/roadmap.md)
