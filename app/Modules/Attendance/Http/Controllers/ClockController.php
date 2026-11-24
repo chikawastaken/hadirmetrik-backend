@@ -66,10 +66,12 @@ class ClockController extends Controller
             ->limit(30)
             ->get();
         return ApiResponse::success($records->map(fn($r) => [
+            'id' => $r->id,
             'date' => $r->date,
             'clock_in' => $r->clock_in?->toIso8601String(),
             'clock_out' => $r->clock_out?->toIso8601String(),
             'status' => $r->status,
+            'correction_reason' => $r->correction_reason,
         ]));
     }
 }
